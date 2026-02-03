@@ -90,3 +90,11 @@ add_executable(opensaints
 )
 
 target_link_libraries(opensaints PRIVATE opensaints_core)
+
+# Demo executable (when renderer is available)
+if(BUILD_RENDERER AND SDL2_FOUND AND Vulkan_FOUND)
+    add_executable(opensaints_demo
+        demo.cpp
+    )
+    target_link_libraries(opensaints_demo PRIVATE opensaints_core)
+endif()
