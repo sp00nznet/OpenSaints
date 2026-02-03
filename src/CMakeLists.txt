@@ -24,10 +24,26 @@ set(ENGINE_SOURCES
     engine/asset_manager.h
 )
 
+# Platform layer (SDL2)
+set(PLATFORM_SOURCES
+    platform/application.cpp
+    platform/application.h
+)
+
+# Rendering
+set(RENDER_SOURCES
+    render/renderer.cpp
+    render/renderer.h
+    render/vulkan_backend.cpp
+    render/vulkan_backend.h
+)
+
 # Combine all sources
 add_library(opensaints_core STATIC
     ${FORMAT_SOURCES}
     ${ENGINE_SOURCES}
+    ${PLATFORM_SOURCES}
+    ${RENDER_SOURCES}
 )
 
 target_include_directories(opensaints_core PUBLIC
@@ -46,6 +62,26 @@ elseif(APPLE)
 elseif(UNIX)
     # Linux-specific
     target_link_libraries(opensaints_core PUBLIC stdc++fs)
+endif()
+
+# Optional SDL2 support
+if(SDL2_FOUND)
+    target_include_directories(opensaints_core PUBLIC ${SDL2_INCLUDE_DIRS})
+    target_link_libraries(opensaints_core PUBLIC ${SDL2_LIBRARIES})
+    target_compile_definitions(opensaints_core PUBLIC HAVE_SDL2)
+endif()
+
+# Optional Vulkan support
+if(Vulkan_FOUND)
+    target_include_directories(opensaints_core PUBLIC ${Vulkan_INCLUDE_DIRS})
+    target_link_libraries(opensaints_core PUBLIC ${Vulkan_LIBRARIES})
+    target_compile_definitions(opensaints_core PUBLIC HAVE_VULKAN)
+endif()
+
+# Optional GLM support
+if(GLM_INCLUDE_DIR)
+    target_include_directories(opensaints_core PUBLIC ${GLM_INCLUDE_DIR})
+    target_compile_definitions(opensaints_core PUBLIC HAVE_GLM)
 endif()
 
 # Main executable
