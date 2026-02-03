@@ -1,0 +1,48 @@
+# Build artifacts
+build/
+cmake-build-*/
+*.o
+*.obj
+*.exe
+*.dll
+*.so
+*.dylib
+*.a
+*.lib
+
+# IDE
+.vs/
+.vscode/
+*.user
+*.suo
+*.sln.docstates
+.idea/
+*.swp
+*.swo
+*~
+
+# Game data (don't commit copyrighted assets)
+sr2/
+extracted/
+*.vpp_pc
+*.str2_pc
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# Logs and temp
+*.log
+*.tmp
+*.bak
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Monkey patch source (reference only)
+monkey_patch_src/
+*.zip
