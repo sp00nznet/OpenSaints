@@ -52,6 +52,15 @@ if(BUILD_RENDERER)
     else()
         message(WARNING "GLM not found. Install GLM or add to external/glm.")
     endif()
+
+    # OpenAL (3D audio)
+    find_package(OpenAL QUIET)
+    if(OPENAL_FOUND)
+        message(STATUS "Found OpenAL: ${OPENAL_INCLUDE_DIR}")
+        add_definitions(-DHAVE_OPENAL)
+    else()
+        message(WARNING "OpenAL not found. Install OpenAL Soft for audio support.")
+    endif()
 endif()
 
 # Source files

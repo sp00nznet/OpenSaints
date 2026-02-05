@@ -14,6 +14,8 @@ set(FORMAT_SOURCES
     formats/mesh.h
     formats/chunk.cpp
     formats/chunk.h
+    formats/anim.cpp
+    formats/anim.h
 )
 
 # Engine core
@@ -22,6 +24,22 @@ set(ENGINE_SOURCES
     engine/vfs.h
     engine/asset_manager.cpp
     engine/asset_manager.h
+    engine/entity.cpp
+    engine/entity.h
+    engine/animation.cpp
+    engine/animation.h
+)
+
+# World/streaming
+set(WORLD_SOURCES
+    world/streaming.cpp
+    world/streaming.h
+)
+
+# Audio
+set(AUDIO_SOURCES
+    audio/audio_system.cpp
+    audio/audio_system.h
 )
 
 # Platform layer (SDL2)
@@ -42,6 +60,8 @@ set(RENDER_SOURCES
 add_library(opensaints_core STATIC
     ${FORMAT_SOURCES}
     ${ENGINE_SOURCES}
+    ${WORLD_SOURCES}
+    ${AUDIO_SOURCES}
     ${PLATFORM_SOURCES}
     ${RENDER_SOURCES}
 )
@@ -82,6 +102,13 @@ endif()
 if(GLM_INCLUDE_DIR)
     target_include_directories(opensaints_core PUBLIC ${GLM_INCLUDE_DIR})
     target_compile_definitions(opensaints_core PUBLIC HAVE_GLM)
+endif()
+
+# Optional OpenAL support
+if(OPENAL_FOUND)
+    target_include_directories(opensaints_core PUBLIC ${OPENAL_INCLUDE_DIR})
+    target_link_libraries(opensaints_core PUBLIC ${OPENAL_LIBRARY})
+    target_compile_definitions(opensaints_core PUBLIC HAVE_OPENAL)
 endif()
 
 # Main executable
