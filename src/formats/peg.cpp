@@ -101,7 +101,7 @@ bool PegArchive::open(const std::filesystem::path& path) {
     std::string ext = path.extension().string();
     std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
 
-    if (ext == ".cpeg_pc" || ext == ".cvbm_pc") {
+    if (ext == ".cpeg_pc" || ext == ".cvbm_pc" || ext == ".peg_pc") {
         cpuPath = path;
         gpuPath = paired;
     } else {
@@ -155,12 +155,23 @@ bool PegArchive::open(const std::filesystem::path& cpuPath,
     m_textures.clear();
     m_textures.reserve(m_header.num_textures);
 
-    for (const auto& entry : entries) {
+    // Parse names as sequential null-terminated strings
+    std::vector<std::string> nameList;
+    size_t pos = 0;
+    while (pos < nameTableSize) {
+        std::string name = &names[pos];
+        if (name.empty()) break;
+        nameList.push_back(name);
+        pos += name.length() + 1;
+    }
+
+    for (size_t i = 0; i < entries.size(); i++) {
+        const auto& entry = entries[i];
         PegTexture tex;
 
-        // Extract name
-        if (entry.name_offset < nameTableSize) {
-            tex.name = &names[entry.name_offset];
+        // Use entry index to get name (sequential order)
+        if (i < nameList.size()) {
+            tex.name = nameList[i];
         }
 
         tex.width = entry.width;
@@ -312,6 +323,10 @@ std::filesystem::path PegArchive::findPairedFile(const std::filesystem::path& pa
         pairedExt = ".gvbm_pc";
     } else if (ext == ".gvbm_pc") {
         pairedExt = ".cvbm_pc";
+    } else if (ext == ".peg_pc") {
+        pairedExt = ".g_peg_pc";
+    } else if (ext == ".g_peg_pc") {
+        pairedExt = ".peg_pc";
     } else {
         return {};
     }

@@ -148,3 +148,9 @@ if(BUILD_RENDERER AND SDL2_FOUND AND Vulkan_FOUND)
     )
     target_link_libraries(opensaints_demo PRIVATE opensaints_core)
 endif()
+
+# Asset test tool (always built)
+add_executable(asset_test
+    asset_test.cpp
+)
+target_link_libraries(asset_test PRIVATE opensaints_core)

@@ -53,21 +53,22 @@ struct PegHeader {
     uint16_t reserved;       // Padding
 };
 
-// Individual texture entry header
+// Individual texture entry header (48 bytes = 0x30)
 struct PegTextureEntry {
-    uint32_t data_offset;    // Offset to texture data (in data file)
-    uint16_t width;          // Texture width
-    uint16_t height;         // Texture height
-    uint16_t format;         // PegFormat value
-    uint16_t flags;          // Texture flags
-    uint16_t name_offset;    // Offset to name in name table
-    uint16_t source_width;   // Original width before padding
-    uint16_t source_height;  // Original height before padding
-    uint8_t  mip_levels;     // Number of mipmap levels
-    uint8_t  frames;         // Number of frames (animated textures)
-    uint16_t frame_delay;    // Animation frame delay
-    uint32_t data_size;      // Size of texture data
-    uint8_t  reserved[8];    // Padding/unknown
+    uint32_t data_offset;    // 0x00: Offset to texture data (in data file)
+    uint16_t width;          // 0x04: Texture width
+    uint16_t height;         // 0x06: Texture height
+    uint16_t format;         // 0x08: PegFormat value
+    uint16_t flags;          // 0x0A: Texture flags
+    uint16_t name_offset;    // 0x0C: Offset to name in name table
+    uint16_t source_width;   // 0x0E: Original width before padding
+    uint16_t source_height;  // 0x10: Original height before padding
+    uint8_t  mip_levels;     // 0x12: Number of mipmap levels
+    uint8_t  frames;         // 0x13: Number of frames (animated textures)
+    uint16_t frame_delay;    // 0x14: Animation frame delay
+    uint16_t unknown1;       // 0x16: Unknown
+    uint32_t data_size;      // 0x18: Size of texture data
+    uint8_t  reserved[20];   // 0x1C: Padding/unknown (20 bytes to make 48 total)
 };
 
 #pragma pack(pop)
