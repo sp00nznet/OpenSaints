@@ -19,41 +19,40 @@ OpenSaints is a project to create an open-source engine compatible with Saints R
 
 **This project requires a legal copy of Saints Row 2 to function.** OpenSaints does not include any game assets.
 
-## Features
+## Current Status
 
-### Phase 1: Asset Pipeline
-- [x] VPP archive extraction and virtual filesystem
-- [x] Preload table parsing for asset dependencies
-- [x] XTBL configuration file parsing
-- [x] PEG texture package parsing with DXT decompression
-- [x] Mesh parsing (character and static meshes)
-- [x] World chunk parsing
-- [x] Animation file format parsing
+**Early Development** - Core rendering works, asset loading in progress.
 
-### Phase 2: Core Engine
-- [x] Virtual filesystem with priority-based mounting
-- [x] Asset manager with caching and memory budget
-- [x] Vulkan rendering backend
+See [docs/development-status.md](docs/development-status.md) for detailed status.
+
+### Working
+- [x] Vulkan rendering backend with basic geometry
 - [x] SDL2 window/input handling
-- [x] World streaming system with predictive loading
-- [x] Entity-component system
-- [x] Animation controller with layered blending
+- [x] VPP archive extraction (Python and C++ tools)
+- [x] Demo scene with rotating objects
+- [x] CMake build system (Windows/MSVC)
 
-### Phase 3: Subsystems
-- [x] 3D spatial audio (OpenAL)
-- [x] UI system with VINT document parsing
-- [x] Input handling (keyboard, mouse, gamepad)
+### In Progress
+- [ ] Asset manager integration with VFS
+- [ ] PEG texture loading and rendering
+- [ ] Mesh loading and rendering
 
-### Phase 4: Game Logic
-- [x] Script system with action node behavior trees
-- [x] Physics system with collision detection
-- [x] Vehicle physics model
-- [x] Raycasting for line-of-sight
+### Planned (Phase 1: Asset Pipeline)
+- [ ] Full VPP virtual filesystem mounting
+- [ ] Preload table parsing
+- [ ] XTBL configuration parsing
+- [ ] World chunk loading
+- [ ] Animation loading
 
-### Planned
+### Planned (Phase 2+)
+- [ ] World streaming
+- [ ] Entity-component system
+- [ ] Audio (OpenAL)
+- [ ] UI system
+- [ ] Physics
+- [ ] Scripting
 - [ ] AI pathfinding
 - [ ] Mission system
-- [ ] Full game integration
 
 ## Building
 
@@ -156,10 +155,10 @@ OpenSaints/
 
 ## Documentation
 
-- [Architecture Overview](docs/architecture.md)
-- [File Formats Reference](docs/formats.md)
-- [Building & Development](docs/building.md)
-- [Contributing Guide](docs/contributing.md)
+- [Development Status](docs/development-status.md) - Current progress and next steps
+- [Vulkan Renderer](docs/vulkan-renderer.md) - Implementation notes and issues solved
+- [Architecture Overview](docs/architecture.md) - System design (planned)
+- [File Formats Reference](docs/formats.md) - SR2 format documentation (planned)
 
 ## Technical Details
 
