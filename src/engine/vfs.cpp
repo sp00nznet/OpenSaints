@@ -88,22 +88,23 @@ bool VirtualFileSystem::mountDirectory(const std::filesystem::path& directory,
     }
 
     // Sort by priority order
+    const auto& prioOrder = priorityOrder;  // Local reference for lambda capture
     std::sort(vppFiles.begin(), vppFiles.end(),
-              [&priorityOrder](const std::filesystem::path& a, const std::filesystem::path& b) {
+              [&prioOrder](const std::filesystem::path& a, const std::filesystem::path& b) {
                   std::string nameA = a.stem().string();
                   std::string nameB = b.stem().string();
                   std::transform(nameA.begin(), nameA.end(), nameA.begin(), ::tolower);
                   std::transform(nameB.begin(), nameB.end(), nameB.begin(), ::tolower);
 
-                  auto posA = std::find(priorityOrder.begin(), priorityOrder.end(), nameA);
-                  auto posB = std::find(priorityOrder.begin(), priorityOrder.end(), nameB);
+                  auto posA = std::find(prioOrder.begin(), prioOrder.end(), nameA);
+                  auto posB = std::find(prioOrder.begin(), prioOrder.end(), nameB);
 
-                  int indexA = (posA != priorityOrder.end()) ?
-                               std::distance(priorityOrder.begin(), posA) :
-                               static_cast<int>(priorityOrder.size());
-                  int indexB = (posB != priorityOrder.end()) ?
-                               std::distance(priorityOrder.begin(), posB) :
-                               static_cast<int>(priorityOrder.size());
+                  int indexA = (posA != prioOrder.end()) ?
+                               std::distance(prioOrder.begin(), posA) :
+                               static_cast<int>(prioOrder.size());
+                  int indexB = (posB != prioOrder.end()) ?
+                               std::distance(prioOrder.begin(), posB) :
+                               static_cast<int>(prioOrder.size());
 
                   return indexA < indexB;
               });

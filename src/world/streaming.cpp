@@ -1,5 +1,6 @@
 #include "streaming.h"
 #include "../engine/asset_manager.h"
+#include "../engine/vfs.h"
 #include "../formats/chunk.h"
 #include <iostream>
 #include <algorithm>
