@@ -1,9 +1,11 @@
 #include "vulkan_backend.h"
+#include "default_shaders.h"
 
 #ifdef HAVE_VULKAN
 
 #include "../platform/application.h"
-#include <vulkan/vulkan.h>
+#define VOLK_IMPLEMENTATION
+#include <volk.h>
 #include <SDL.h>
 #include <SDL_vulkan.h>
 #include <iostream>
@@ -33,6 +35,12 @@ bool VulkanRenderer::initialize(Application* app) {
     m_swapchainWidth = app->windowWidth();
     m_swapchainHeight = app->windowHeight();
 
+    // Initialize volk (Vulkan loader)
+    if (volkInitialize() != VK_SUCCESS) {
+        std::cerr << "Failed to initialize Vulkan loader\n";
+        return false;
+    }
+
     if (!createInstance()) return false;
     if (!createSurface()) return false;
     if (!selectPhysicalDevice()) return false;
@@ -50,6 +58,10 @@ bool VulkanRenderer::initialize(Application* app) {
 
     m_initialized = true;
     std::cout << "Vulkan renderer initialized\n";
+    std::cout << "  Swapchain: " << m_swapchainWidth << "x" << m_swapchainHeight << "\n";
+    std::cout << "  Format: " << m_swapchainFormat << "\n";
+    std::cout << "  Images: " << m_swapchainImageCount << "\n";
+    std::cout.flush();
 
     return true;
 }
@@ -164,6 +176,9 @@ bool VulkanRenderer::createInstance() {
         return false;
     }
 
+    // Load instance-level Vulkan functions
+    volkLoadInstance(m_instance);
+
     return true;
 }
 
@@ -263,6 +278,9 @@ bool VulkanRenderer::createLogicalDevice() {
         return false;
     }
 
+    // Load device-level Vulkan functions
+    volkLoadDevice(m_device);
+
     vkGetDeviceQueue(m_device, m_graphicsFamily, 0, &m_graphicsQueue);
     vkGetDeviceQueue(m_device, m_presentFamily, 0, &m_presentQueue);
 
@@ -344,6 +362,7 @@ bool VulkanRenderer::createSwapchain() {
 
     m_swapchainWidth = extent.width;
     m_swapchainHeight = extent.height;
+    m_swapchainFormat = surfaceFormat.format;
 
     // Create image views
     m_swapchainImageViews.resize(m_swapchainImageCount);
@@ -368,7 +387,7 @@ bool VulkanRenderer::createSwapchain() {
 
 bool VulkanRenderer::createRenderPass() {
     VkAttachmentDescription colorAttachment = {};
-    colorAttachment.format = VK_FORMAT_B8G8R8A8_SRGB;
+    colorAttachment.format = static_cast<VkFormat>(m_swapchainFormat);
     colorAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
     colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
     colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
@@ -562,6 +581,20 @@ bool VulkanRenderer::createUniformBuffers() {
     VkDeviceSize bufferSize = sizeof(UniformData);
 
     m_uniformBuffers.resize(MAX_FRAMES_IN_FLIGHT);
+    m_descriptorSets.resize(MAX_FRAMES_IN_FLIGHT);
+
+    // Allocate descriptor sets
+    std::vector<VkDescriptorSetLayout> layouts(MAX_FRAMES_IN_FLIGHT, m_descriptorSetLayout);
+    VkDescriptorSetAllocateInfo allocInfo = {};
+    allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    allocInfo.descriptorPool = m_descriptorPool;
+    allocInfo.descriptorSetCount = MAX_FRAMES_IN_FLIGHT;
+    allocInfo.pSetLayouts = layouts.data();
+
+    if (vkAllocateDescriptorSets(m_device, &allocInfo, m_descriptorSets.data()) != VK_SUCCESS) {
+        std::cerr << "Failed to allocate descriptor sets\n";
+        return false;
+    }
 
     for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
         createVkBuffer(bufferSize,
@@ -571,6 +604,23 @@ bool VulkanRenderer::createUniformBuffers() {
                        m_uniformBuffers[i].memory);
         m_uniformBuffers[i].size = bufferSize;
         m_uniformBuffers[i].type = BufferType::Uniform;
+
+        // Write descriptor set
+        VkDescriptorBufferInfo bufferInfo = {};
+        bufferInfo.buffer = m_uniformBuffers[i].buffer;
+        bufferInfo.offset = 0;
+        bufferInfo.range = sizeof(UniformData);
+
+        VkWriteDescriptorSet descriptorWrite = {};
+        descriptorWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        descriptorWrite.dstSet = m_descriptorSets[i];
+        descriptorWrite.dstBinding = 0;
+        descriptorWrite.dstArrayElement = 0;
+        descriptorWrite.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        descriptorWrite.descriptorCount = 1;
+        descriptorWrite.pBufferInfo = &bufferInfo;
+
+        vkUpdateDescriptorSets(m_device, 1, &descriptorWrite, 0, nullptr);
     }
 
     return true;
@@ -601,6 +651,30 @@ bool VulkanRenderer::createDefaultResources() {
     uint32_t whitePixel = 0xFFFFFFFF;
     m_whiteTexture = createTexture(1, 1, TextureFormat::RGBA8, &whitePixel);
 
+    // Create default shaders
+    m_defaultVertShader = createShader(ShaderStage::Vertex, default_vert_spv, default_vert_spv_size);
+    m_defaultFragShader = createShader(ShaderStage::Fragment, default_frag_spv, default_frag_spv_size);
+
+    if (m_defaultVertShader == InvalidShader || m_defaultFragShader == InvalidShader) {
+        std::cerr << "Failed to create default shaders\n";
+        return false;
+    }
+
+    // Create default pipeline
+    PipelineDesc pipelineDesc;
+    pipelineDesc.vertexShader = m_defaultVertShader;
+    pipelineDesc.fragmentShader = m_defaultFragShader;
+    pipelineDesc.depthTest = true;
+    pipelineDesc.depthWrite = true;
+    pipelineDesc.cullMode = CullMode::Back;
+
+    m_defaultPipeline = createPipeline(pipelineDesc);
+    if (m_defaultPipeline == InvalidPipeline) {
+        std::cerr << "Failed to create default pipeline\n";
+        return false;
+    }
+
+    std::cout << "Default pipeline created\n";
     return true;
 }
 
@@ -676,8 +750,12 @@ bool VulkanRenderer::beginFrame() {
     renderPassInfo.renderArea.extent = {m_swapchainWidth, m_swapchainHeight};
 
     VkClearValue clearValues[2] = {};
-    clearValues[0].color = {{m_clearColor.r, m_clearColor.g, m_clearColor.b, m_clearColor.a}};
-    clearValues[1].depthStencil = {1.0f, 0};
+    clearValues[0].color.float32[0] = m_clearColor.r;
+    clearValues[0].color.float32[1] = m_clearColor.g;
+    clearValues[0].color.float32[2] = m_clearColor.b;
+    clearValues[0].color.float32[3] = m_clearColor.a;
+    clearValues[1].depthStencil.depth = 1.0f;
+    clearValues[1].depthStencil.stencil = 0;
     renderPassInfo.clearValueCount = 2;
     renderPassInfo.pClearValues = clearValues;
 
@@ -701,6 +779,11 @@ bool VulkanRenderer::beginFrame() {
     m_stats.drawCalls = 0;
     m_stats.triangles = 0;
     m_stats.vertices = 0;
+
+    // Reset bound state for new frame (command buffer was reset)
+    m_boundPipeline = InvalidPipeline;
+    m_boundVertexBuffer = InvalidBuffer;
+    m_boundIndexBuffer = InvalidBuffer;
 
     return true;
 }
@@ -739,6 +822,12 @@ void VulkanRenderer::endFrame() {
     presentInfo.pImageIndices = &m_imageIndex;
 
     VkResult result = vkQueuePresentKHR(m_presentQueue, &presentInfo);
+
+    static int frameCount = 0;
+    if (++frameCount <= 3) {
+        std::cout << "Frame " << frameCount << " presented (result: " << result << ")\n";
+        std::cout.flush();
+    }
 
     if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR || m_framebufferResized) {
         m_framebufferResized = false;
@@ -1064,6 +1153,9 @@ void VulkanRenderer::bindPipeline(PipelineHandle handle) {
     auto it = m_pipelines.find(handle);
     if (it != m_pipelines.end()) {
         vkCmdBindPipeline(m_commandBuffers[m_currentFrame], VK_PIPELINE_BIND_POINT_GRAPHICS, it->second.pipeline);
+        // Bind descriptor set with uniform buffer
+        vkCmdBindDescriptorSets(m_commandBuffers[m_currentFrame], VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                it->second.layout, 0, 1, &m_descriptorSets[m_currentFrame], 0, nullptr);
         m_boundPipeline = handle;
     }
 }
@@ -1098,6 +1190,10 @@ void VulkanRenderer::setUniforms(const UniformData& uniforms) {
 }
 
 void VulkanRenderer::draw(uint32_t vertexCount, uint32_t firstVertex) {
+    // Auto-bind default pipeline if none bound
+    if (m_boundPipeline == InvalidPipeline && m_defaultPipeline != InvalidPipeline) {
+        bindPipeline(m_defaultPipeline);
+    }
     vkCmdDraw(m_commandBuffers[m_currentFrame], vertexCount, 1, firstVertex, 0);
     m_stats.drawCalls++;
     m_stats.vertices += vertexCount;
@@ -1105,6 +1201,10 @@ void VulkanRenderer::draw(uint32_t vertexCount, uint32_t firstVertex) {
 }
 
 void VulkanRenderer::drawIndexed(uint32_t indexCount, uint32_t firstIndex, int32_t vertexOffset) {
+    // Auto-bind default pipeline if none bound
+    if (m_boundPipeline == InvalidPipeline && m_defaultPipeline != InvalidPipeline) {
+        bindPipeline(m_defaultPipeline);
+    }
     vkCmdDrawIndexed(m_commandBuffers[m_currentFrame], indexCount, 1, firstIndex, vertexOffset, 0);
     m_stats.drawCalls++;
     m_stats.triangles += indexCount / 3;

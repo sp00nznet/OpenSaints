@@ -138,6 +138,7 @@ private:
     VkImage m_depthImage = nullptr;
     VkDeviceMemory m_depthImageMemory = nullptr;
     VkImageView m_depthImageView = nullptr;
+    uint32_t m_swapchainFormat = 50; // VK_FORMAT_B8G8R8A8_SRGB
 
     // Render pass and framebuffers
     VkRenderPass m_renderPass = nullptr;
@@ -162,6 +163,9 @@ private:
     // Default resources
     VkSampler m_defaultSampler = nullptr;
     TextureHandle m_whiteTexture = InvalidTexture;
+    PipelineHandle m_defaultPipeline = InvalidPipeline;
+    ShaderHandle m_defaultVertShader = InvalidShader;
+    ShaderHandle m_defaultFragShader = InvalidShader;
 
     // Uniform buffers (per frame)
     std::vector<VulkanBuffer> m_uniformBuffers;
@@ -178,7 +182,7 @@ private:
     BufferHandle m_boundVertexBuffer = InvalidBuffer;
     BufferHandle m_boundIndexBuffer = InvalidBuffer;
     TextureHandle m_boundTextures[8] = {InvalidTexture};
-    Color m_clearColor;
+    Color m_clearColor{0.392f, 0.584f, 0.929f, 1.0f}; // Cornflower blue default
 
     // Stats
     mutable RenderStats m_stats = {};

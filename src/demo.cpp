@@ -1,6 +1,7 @@
 // OpenSaints Demo/Test Scene
 // Simple scene to verify rendering pipeline works
 
+#define SDL_MAIN_HANDLED
 #include "platform/application.h"
 #include "render/renderer.h"
 #include "engine/vfs.h"
@@ -19,12 +20,13 @@ public:
         m_app = app;
         m_renderer = renderer;
 
-        // Create a simple triangle mesh
+        // Create a simple triangle mesh - offset to the left so it doesn't overlap the cube
+        // Vertices wound counter-clockwise when viewed from +Z (camera side)
         RenderVertex vertices[] = {
-            // Position           Normal            UV        Color
-            {{-0.5f, -0.5f, 0.0f}, {0, 0, 1}, {0, 1}, 0xFFFF0000}, // Red
-            {{ 0.5f, -0.5f, 0.0f}, {0, 0, 1}, {1, 1}, 0xFF00FF00}, // Green
-            {{ 0.0f,  0.5f, 0.0f}, {0, 0, 1}, {0.5f, 0}, 0xFF0000FF}, // Blue
+            // Position              Normal            UV        Color
+            {{-2.5f, -0.5f, 0.0f}, {0, 0, 1}, {0, 1}, 0xFFFF0000}, // Red (bottom-left)
+            {{-2.0f,  0.5f, 0.0f}, {0, 0, 1}, {0.5f, 0}, 0xFF0000FF}, // Blue (top)
+            {{-1.5f, -0.5f, 0.0f}, {0, 0, 1}, {1, 1}, 0xFF00FF00}, // Green (bottom-right)
         };
 
         m_triangleBuffer = renderer->createBuffer(
@@ -123,27 +125,21 @@ public:
         uniforms.ambientColor[2] = 0.3f;
         uniforms.ambientColor[3] = 1.0f;
 
+        // Set shared model matrix - both objects use this
+        RenderMath::rotateY(uniforms.modelMatrix, m_rotation);
         m_renderer->setUniforms(uniforms);
 
-        // Draw triangle
-        if (m_triangleBuffer != InvalidBuffer) {
-            m_renderer->bindVertexBuffer(m_triangleBuffer);
-            m_renderer->draw(3);
-        }
-
-        // Draw cube with offset
+        // Draw cube (at origin, will rotate)
         if (m_cubeVertexBuffer != InvalidBuffer && m_cubeIndexBuffer != InvalidBuffer) {
-            // Offset the cube
-            float cubeModel[16];
-            RenderMath::translate(cubeModel, 2.0f, 0, 0);
-            float rotated[16];
-            RenderMath::rotateY(rotated, m_rotation * 0.7f);
-            RenderMath::multiply(uniforms.modelMatrix, cubeModel, rotated);
-            m_renderer->setUniforms(uniforms);
-
             m_renderer->bindVertexBuffer(m_cubeVertexBuffer);
             m_renderer->bindIndexBuffer(m_cubeIndexBuffer);
             m_renderer->drawIndexed(36);
+        }
+
+        // Draw triangle (vertices offset in the mesh itself)
+        if (m_triangleBuffer != InvalidBuffer) {
+            m_renderer->bindVertexBuffer(m_triangleBuffer);
+            m_renderer->draw(3);
         }
     }
 
@@ -239,6 +235,14 @@ private:
 } // namespace opensaints
 
 // Demo entry point
+int runDemo();
+
+int main(int argc, char* argv[]) {
+    (void)argc;
+    (void)argv;
+    return runDemo();
+}
+
 int runDemo() {
     using namespace opensaints;
 

@@ -21,28 +21,50 @@ endif()
 
 # Find external dependencies (optional for Phase 2)
 if(BUILD_RENDERER)
-    # SDL2
-    find_package(SDL2 QUIET)
-    if(SDL2_FOUND)
-        message(STATUS "Found SDL2: ${SDL2_VERSION}")
+    # SDL2 - check local first
+    set(SDL2_DIR "${CMAKE_SOURCE_DIR}/external/SDL2-2.28.5")
+    if(EXISTS "${SDL2_DIR}/include/SDL.h")
+        message(STATUS "Found local SDL2: ${SDL2_DIR}")
+        set(SDL2_FOUND TRUE)
+        set(SDL2_INCLUDE_DIRS "${SDL2_DIR}/include")
+        set(SDL2_LIBRARIES "${SDL2_DIR}/lib/x64/SDL2.lib" "${SDL2_DIR}/lib/x64/SDL2main.lib")
         add_definitions(-DHAVE_SDL2)
+        # Copy DLL to build dir
+        file(COPY "${SDL2_DIR}/lib/x64/SDL2.dll" DESTINATION "${CMAKE_BINARY_DIR}/src/Release")
+        file(COPY "${SDL2_DIR}/lib/x64/SDL2.dll" DESTINATION "${CMAKE_BINARY_DIR}/src/Debug")
     else()
-        message(WARNING "SDL2 not found. Install SDL2 development libraries.")
+        find_package(SDL2 QUIET)
+        if(SDL2_FOUND)
+            message(STATUS "Found SDL2: ${SDL2_VERSION}")
+            add_definitions(-DHAVE_SDL2)
+        else()
+            message(WARNING "SDL2 not found.")
+        endif()
     endif()
 
-    # Vulkan
-    find_package(Vulkan QUIET)
-    if(Vulkan_FOUND)
-        message(STATUS "Found Vulkan: ${Vulkan_VERSION}")
+    # Vulkan - check local headers first
+    set(VULKAN_HEADERS_DIR "${CMAKE_SOURCE_DIR}/external/vulkan/include")
+    if(EXISTS "${VULKAN_HEADERS_DIR}/vulkan/vulkan.h")
+        message(STATUS "Found local Vulkan headers: ${VULKAN_HEADERS_DIR}")
+        set(Vulkan_FOUND TRUE)
+        set(Vulkan_INCLUDE_DIRS "${VULKAN_HEADERS_DIR}")
+        set(Vulkan_LIBRARIES "")  # Will load dynamically
         add_definitions(-DHAVE_VULKAN)
     else()
-        message(WARNING "Vulkan not found. Install Vulkan SDK.")
+        find_package(Vulkan QUIET)
+        if(Vulkan_FOUND)
+            message(STATUS "Found Vulkan: ${Vulkan_VERSION}")
+            add_definitions(-DHAVE_VULKAN)
+        else()
+            message(WARNING "Vulkan not found.")
+        endif()
     endif()
 
     # GLM (header-only math library)
     find_path(GLM_INCLUDE_DIR glm/glm.hpp
         HINTS
             ${CMAKE_SOURCE_DIR}/external/glm
+            ${CMAKE_SOURCE_DIR}/external
             /usr/include
             /usr/local/include
     )
@@ -50,7 +72,7 @@ if(BUILD_RENDERER)
         message(STATUS "Found GLM: ${GLM_INCLUDE_DIR}")
         add_definitions(-DHAVE_GLM)
     else()
-        message(WARNING "GLM not found. Install GLM or add to external/glm.")
+        message(WARNING "GLM not found.")
     endif()
 
     # OpenAL (3D audio)
@@ -59,7 +81,7 @@ if(BUILD_RENDERER)
         message(STATUS "Found OpenAL: ${OPENAL_INCLUDE_DIR}")
         add_definitions(-DHAVE_OPENAL)
     else()
-        message(WARNING "OpenAL not found. Install OpenAL Soft for audio support.")
+        message(WARNING "OpenAL not found.")
     endif()
 endif()
 

@@ -115,8 +115,10 @@ endif()
 # Optional Vulkan support
 if(Vulkan_FOUND)
     target_include_directories(opensaints_core PUBLIC ${Vulkan_INCLUDE_DIRS})
-    target_link_libraries(opensaints_core PUBLIC ${Vulkan_LIBRARIES})
-    target_compile_definitions(opensaints_core PUBLIC HAVE_VULKAN)
+    target_include_directories(opensaints_core PUBLIC ${CMAKE_SOURCE_DIR}/external)
+    # Use volk for dynamic Vulkan loading
+    target_sources(opensaints_core PRIVATE ${CMAKE_SOURCE_DIR}/external/volk.c)
+    target_compile_definitions(opensaints_core PUBLIC HAVE_VULKAN VK_NO_PROTOTYPES)
 endif()
 
 # Optional GLM support
