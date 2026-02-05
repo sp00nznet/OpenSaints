@@ -13,8 +13,8 @@
 namespace opensaints {
 
 // Mesh file signatures
-constexpr uint32_t CMESH_SIGNATURE = 0x00000000; // Character mesh (needs investigation)
-constexpr uint32_t SMESH_SIGNATURE = 0x00000000; // Static mesh (needs investigation)
+constexpr uint32_t CMESH_SIGNATURE = 0x424BD00D; // Character mesh "..KB"
+constexpr uint32_t SMESH_SIGNATURE = 0x424BD00D; // Static mesh (same signature)
 
 // Vertex component types
 enum class VertexComponentType : uint8_t {

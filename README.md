@@ -29,12 +29,14 @@ See [docs/development-status.md](docs/development-status.md) for detailed status
 - [x] Vulkan rendering backend with basic geometry
 - [x] SDL2 window/input handling
 - [x] VPP archive extraction (Python and C++ tools)
+- [x] PEG texture parsing and DXT decompression
+- [x] Texture export to BMP/TGA
 - [x] Demo scene with rotating objects
 - [x] CMake build system (Windows/MSVC)
 
 ### In Progress
 - [ ] Asset manager integration with VFS
-- [ ] PEG texture loading and rendering
+- [ ] Texture rendering in Vulkan shaders
 - [ ] Mesh loading and rendering
 
 ### Planned (Phase 1: Asset Pipeline)
@@ -113,6 +115,30 @@ python tools/extract_all.py "path/to/saints row 2" ./extracted --list
 vpp_extract common.vpp_pc ./common_extracted
 ```
 
+### Asset Testing Tool
+```bash
+# List contents of a VPP archive
+asset_test list-vpp common.vpp_pc
+
+# Extract VPP to directory
+asset_test extract-vpp common.vpp_pc ./extracted
+
+# List textures in a PEG package
+asset_test list-peg aisha.peg_pc
+
+# Extract texture to BMP (viewable in Windows)
+asset_test extract-tex aisha.peg_pc "cmcoa_waisha01_d.tga" output.bmp
+
+# Extract texture to TGA
+asset_test extract-tex aisha.peg_pc "pat_zebra01.tga" output.tga
+
+# Find all PEG files in directory
+asset_test find-pegs ./extracted
+
+# Scan game directory for assets
+asset_test scan-game "C:/Games/Saints Row 2"
+```
+
 ## Project Structure
 
 ```
@@ -166,15 +192,16 @@ OpenSaints/
 
 | Extension | Type | Status |
 |-----------|------|--------|
-| `.vpp_pc` | Archive | Full support |
-| `.cpeg_pc`/`.gpeg_pc` | Textures | Full support |
-| `.cvbm_pc`/`.gvbm_pc` | Textures | Full support |
-| `.cmesh_pc`/`.gcmesh_pc` | Character mesh | Basic support |
-| `.smesh_pc`/`.gsmesh_pc` | Static mesh | Basic support |
-| `.chunk_pc` | World geometry | Basic support |
-| `.xtbl` | Config tables | Full support |
-| `.anim_pc` | Animations | Basic support |
-| `.vint_doc` | UI documents | Basic support |
+| `.vpp_pc` | Archive | **Working** - extraction and listing |
+| `.peg_pc`/`.g_peg_pc` | Textures | **Working** - parse, DXT decode, export |
+| `.cpeg_pc`/`.gpeg_pc` | Textures | **Working** - parse, DXT decode, export |
+| `.cvbm_pc`/`.gvbm_pc` | Textures | **Working** - parse, DXT decode, export |
+| `.cmesh_pc`/`.gcmesh_pc` | Character mesh | Skeleton code |
+| `.smesh_pc`/`.gsmesh_pc` | Static mesh | Skeleton code |
+| `.chunk_pc` | World geometry | Skeleton code |
+| `.xtbl` | Config tables | Skeleton code |
+| `.anim_pc` | Animations | Skeleton code |
+| `.vint_doc` | UI documents | Skeleton code |
 
 ### Engine Architecture
 

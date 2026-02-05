@@ -174,6 +174,7 @@ bool PegArchive::open(const std::filesystem::path& cpuPath,
             tex.name = nameList[i];
         }
 
+
         tex.width = entry.width;
         tex.height = entry.height;
         tex.source_width = entry.source_width;
@@ -183,7 +184,8 @@ bool PegArchive::open(const std::filesystem::path& cpuPath,
         tex.frames = entry.frames;
         tex.frame_delay = entry.frame_delay;
         tex.data_offset = entry.data_offset;
-        tex.data_size = entry.data_size;
+        // Calculate data size based on format and dimensions (entry.data_size seems unreliable)
+        tex.data_size = tex.calculateDataSize();
 
         m_textures.push_back(std::move(tex));
     }
@@ -234,7 +236,8 @@ std::vector<uint8_t> PegArchive::extractRaw(size_t index) {
     const auto& tex = m_textures[index];
     std::vector<uint8_t> data(tex.data_size);
 
-    m_gpuFile.seekg(tex.data_offset);
+    m_gpuFile.clear(); // Clear any error flags
+    m_gpuFile.seekg(tex.data_offset, std::ios::beg);
     m_gpuFile.read(reinterpret_cast<char*>(data.data()), tex.data_size);
 
     return data;
@@ -261,6 +264,7 @@ std::vector<uint8_t> PegArchive::extractRGBA(size_t index) {
 
     const auto& tex = m_textures[index];
     std::vector<uint8_t> rgba;
+
 
     switch (tex.format) {
         case PegFormat::DXT1:
@@ -348,6 +352,7 @@ std::vector<uint8_t> PegArchive::decodeDXT1(const uint8_t* data,
     std::vector<uint8_t> output(width * height * 4);
     uint32_t blockCountX = (width + 3) / 4;
     uint32_t blockCountY = (height + 3) / 4;
+
 
     for (uint32_t by = 0; by < blockCountY; ++by) {
         for (uint32_t bx = 0; bx < blockCountX; ++bx) {

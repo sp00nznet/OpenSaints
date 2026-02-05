@@ -147,6 +147,12 @@ if(BUILD_RENDERER AND SDL2_FOUND AND Vulkan_FOUND)
         demo.cpp
     )
     target_link_libraries(opensaints_demo PRIVATE opensaints_core)
+
+    # Asset Viewer (3D mesh/texture browser)
+    add_executable(asset_viewer
+        asset_viewer.cpp
+    )
+    target_link_libraries(asset_viewer PRIVATE opensaints_core)
 endif()
 
 # Asset test tool (always built)

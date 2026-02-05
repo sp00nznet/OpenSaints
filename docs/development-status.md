@@ -22,15 +22,23 @@ OpenSaints is in early development. The core rendering pipeline is functional wi
 |-----------|--------|-------|
 | **Asset Manager** | Skeleton | Code exists, not tested with real assets |
 | **VFS** | Skeleton | Code exists, not integrated |
-| **PEG Parser** | Skeleton | Code exists, not tested |
 | **Mesh Parser** | Skeleton | Code exists, not tested |
+| **Texture Rendering** | Not started | Shaders only use vertex colors currently |
+
+### What Works (Asset Loading)
+
+| Component | Status | Notes |
+|-----------|--------|-------|
+| **VPP Parser** | Working | Extracts all files from .vpp_pc archives |
+| **PEG Parser** | Working | Parses .peg_pc/.g_peg_pc texture packages |
+| **DXT Decoder** | Working | DXT1/DXT3/DXT5 to RGBA conversion |
+| **Texture Export** | Working | BMP and TGA output formats |
+| **asset_test CLI** | Working | Tool for inspecting/extracting assets |
 
 ### Not Started
 
 | Component | Notes |
 |-----------|-------|
-| Actual game asset loading | Need to test parsers with real SR2 files |
-| Texture rendering | Shaders only use vertex colors currently |
 | World/chunk loading | Parser exists but not integrated |
 | Animation playback | Parser exists but not integrated |
 | Audio | OpenAL skeleton exists |
@@ -130,3 +138,26 @@ OpenSaints/
 - VkClearValue union needs explicit member assignment
 - Store actual swapchain format, don't assume
 - Descriptor sets must be allocated AND bound
+
+### Session: February 4-5, 2026 (Continued)
+
+**Goal**: Asset loading from Saints Row 2 game files
+
+**Accomplished**:
+- Extracted 6166 files from common.vpp_pc
+- Implemented PEG texture parser with proper struct layout (48-byte entries)
+- Fixed name table parsing (sequential names, not offset-based)
+- Implemented DXT1/DXT3/DXT5 decompression to RGBA
+- Added BMP and TGA export to asset_test CLI
+- Verified extraction with aisha.peg_pc (character textures)
+
+**PEG Format Findings**:
+- `.peg_pc` = CPU header file, `.g_peg_pc` = GPU data file
+- Header: 20 bytes (GEKV signature, version 10, texture count)
+- Entries: 48 bytes each (not 32 as initially assumed)
+- Name table: Sequential null-terminated strings (entry index matches name index)
+- Format codes: 400=DXT1, 401=DXT3, 402=DXT5
+- Data sizes in struct are unreliable; calculate from dimensions
+
+**Pattern Texture Note**:
+SR2's clothing pattern textures (stripes, zebra, plaid) appear as blue/cyan colors because they are mask textures combined with player-selected colors at runtime.
