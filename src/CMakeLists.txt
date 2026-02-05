@@ -42,6 +42,24 @@ set(AUDIO_SOURCES
     audio/audio_system.h
 )
 
+# UI
+set(UI_SOURCES
+    ui/vint_doc.cpp
+    ui/vint_doc.h
+)
+
+# Script
+set(SCRIPT_SOURCES
+    script/script_system.cpp
+    script/script_system.h
+)
+
+# Physics
+set(PHYSICS_SOURCES
+    physics/physics_system.cpp
+    physics/physics_system.h
+)
+
 # Platform layer (SDL2)
 set(PLATFORM_SOURCES
     platform/application.cpp
@@ -62,6 +80,9 @@ add_library(opensaints_core STATIC
     ${ENGINE_SOURCES}
     ${WORLD_SOURCES}
     ${AUDIO_SOURCES}
+    ${UI_SOURCES}
+    ${SCRIPT_SOURCES}
+    ${PHYSICS_SOURCES}
     ${PLATFORM_SOURCES}
     ${RENDER_SOURCES}
 )
