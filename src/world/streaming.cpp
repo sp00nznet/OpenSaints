@@ -5,6 +5,7 @@
 #include <iostream>
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 
 namespace opensaints {
 
@@ -130,34 +131,73 @@ void StreamingManager::discoverChunks() {
     auto vfs = m_assets->getVFS();
     if (!vfs) return;
 
-    // Find all chunk files
-    auto chunkFiles = vfs->listByExtension("chunk_pc");
+    // Find all .chunk_pc files (exclude .g_chunk_pc GPU files)
+    auto allFiles = vfs->listByExtension("chunk_pc");
 
-    std::cout << "Discovering chunks: " << chunkFiles.size() << " files found\n";
-
-    // For each chunk file, try to extract grid coordinates from filename
-    // Typical naming: sr2_chunk_x_y_z.chunk_pc or similar
-    for (const auto& filename : chunkFiles) {
-        // Extract coordinates from filename (simplified heuristic)
-        // Real implementation would parse chunk headers
-
-        // For now, assign sequential grid positions
-        static int32_t autoX = 0, autoY = 0, autoZ = 0;
-
-        WorldBounds bounds;
-        float chunkSize = 256.0f; // Assumed chunk size
-        bounds.min = WorldVec3(autoX * chunkSize, autoY * chunkSize, autoZ * chunkSize);
-        bounds.max = WorldVec3((autoX + 1) * chunkSize, (autoY + 1) * chunkSize, (autoZ + 1) * chunkSize);
-
-        registerChunkFile(filename, bounds, autoX, autoY, autoZ, 0);
-
-        // Increment grid position
-        autoX++;
-        if (autoX > 10) { autoX = 0; autoZ++; }
-        if (autoZ > 10) { autoZ = 0; autoY++; }
+    std::vector<std::string> chunkFiles;
+    for (const auto& f : allFiles) {
+        // Skip GPU data files
+        if (f.find(".g_chunk_pc") != std::string::npos) continue;
+        if (f.find(".g_peg_pc") != std::string::npos) continue;
+        chunkFiles.push_back(f);
     }
 
-    std::cout << "Registered " << m_chunks.size() << " chunks\n";
+    std::cout << "Discovering chunks: " << chunkFiles.size() << " CPU files found\n";
+
+    int registered = 0;
+    int gridIndex = 0;
+    for (const auto& filename : chunkFiles) {
+        // Quick-parse the header to get real bounds
+        auto result = vfs->read(filename);
+        if (!result.success || result.data.size() < 0xF0) {
+            // Can't read header - skip
+            continue;
+        }
+
+        // Validate signature
+        uint32_t signature = 0;
+        std::memcpy(&signature, result.data.data(), 4);
+        if (signature != 0xBBCACA12) continue;
+
+        // Read bounds from offset 0xD4 (within ChunkGeometryInfo)
+        float boundsMin[3], boundsMax[3];
+        std::memcpy(boundsMin, result.data.data() + 0xD4, sizeof(float) * 3);
+        std::memcpy(boundsMax, result.data.data() + 0xE0, sizeof(float) * 3);
+
+        // Validate bounds are plausible (finite, non-zero extent)
+        bool validBounds = true;
+        for (int i = 0; i < 3; i++) {
+            if (!std::isfinite(boundsMin[i]) || !std::isfinite(boundsMax[i]) ||
+                boundsMax[i] <= boundsMin[i]) {
+                validBounds = false;
+                break;
+            }
+        }
+
+        WorldBounds bounds;
+        if (validBounds) {
+            bounds.min = WorldVec3(boundsMin[0], boundsMin[1], boundsMin[2]);
+            bounds.max = WorldVec3(boundsMax[0], boundsMax[1], boundsMax[2]);
+        } else {
+            // Fallback: assign sequential grid positions
+            float chunkSize = 256.0f;
+            bounds.min = WorldVec3(gridIndex * chunkSize, 0, 0);
+            bounds.max = WorldVec3((gridIndex + 1) * chunkSize, chunkSize, chunkSize);
+        }
+
+        // Derive grid coordinates from bounds center
+        WorldVec3 center = bounds.center();
+        float gridSize = 256.0f;
+        int32_t gx = static_cast<int32_t>(std::floor(center.x / gridSize));
+        int32_t gy = static_cast<int32_t>(std::floor(center.y / gridSize));
+        int32_t gz = static_cast<int32_t>(std::floor(center.z / gridSize));
+
+        registerChunkFile(filename, bounds, gx, gy, gz, 0);
+        registered++;
+        gridIndex++;
+    }
+
+    std::cout << "Registered " << registered << " chunks with real bounds\n";
 }
 
 void StreamingManager::update(const WorldVec3& playerPos, const WorldVec3& playerVelocity, float deltaTime) {
@@ -482,18 +522,40 @@ std::shared_ptr<WorldChunk> StreamingManager::loadChunkSync(const std::string& f
     auto vfs = m_assets->getVFS();
     if (!vfs) return nullptr;
 
-    // Read chunk file
-    auto result = vfs->read(filename);
-    if (!result.success) {
-        std::cerr << "Failed to read chunk file: " << filename << "\n";
+    // Read CPU file (.chunk_pc)
+    auto cpuResult = vfs->read(filename);
+    if (!cpuResult.success) {
+        std::cerr << "Failed to read chunk CPU file: " << filename << "\n";
         return nullptr;
     }
 
-    // Parse chunk
-    auto chunk = std::make_shared<WorldChunk>();
+    // Try to read paired GPU file (.g_chunk_pc)
+    std::vector<uint8_t> gpuData;
+    std::string gpuFilename = filename;
+    // Replace .chunk_pc with .g_chunk_pc
+    size_t extPos = gpuFilename.rfind(".chunk_pc");
+    if (extPos != std::string::npos) {
+        gpuFilename = gpuFilename.substr(0, extPos) + ".g_chunk_pc";
+        auto gpuResult = vfs->read(gpuFilename);
+        if (gpuResult.success) {
+            gpuData = std::move(gpuResult.data);
+        }
+        // Missing GPU file is OK - some chunks are header-only
+    }
 
-    // For now, we can't load from memory directly, so just create empty chunk
-    // Real implementation would need memory-based loading
+    // Extract a clean name from the filename
+    std::string name = filename;
+    size_t slashPos = name.find_last_of("/\\");
+    if (slashPos != std::string::npos) name = name.substr(slashPos + 1);
+    size_t dotPos = name.rfind(".chunk_pc");
+    if (dotPos != std::string::npos) name = name.substr(0, dotPos);
+
+    // Parse chunk from memory buffers
+    auto chunk = std::make_shared<WorldChunk>();
+    if (!chunk->openFromMemory(name, cpuResult.data, gpuData)) {
+        std::cerr << "Failed to parse chunk: " << filename << "\n";
+        return nullptr;
+    }
 
     return chunk;
 }

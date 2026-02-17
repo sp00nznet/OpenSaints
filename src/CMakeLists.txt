@@ -160,3 +160,17 @@ add_executable(asset_test
     asset_test.cpp
 )
 target_link_libraries(asset_test PRIVATE opensaints_core)
+
+# Chunk analyzer tool (no renderer dependency)
+add_executable(chunk_analyzer
+    chunk_analyzer.cpp
+)
+target_link_libraries(chunk_analyzer PRIVATE opensaints_core)
+
+# Chunk viewer (when renderer is available)
+if(BUILD_RENDERER AND SDL2_FOUND AND Vulkan_FOUND)
+    add_executable(chunk_viewer
+        chunk_viewer.cpp
+    )
+    target_link_libraries(chunk_viewer PRIVATE opensaints_core)
+endif()

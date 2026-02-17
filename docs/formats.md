@@ -171,38 +171,78 @@ Offset  Size    Description
 
 ## World Chunks
 
-`.chunk_pc` files contain world geometry for streaming.
+`.chunk_pc` / `.g_chunk_pc` files contain world geometry for streaming.
+Like meshes and textures, they use CPU/GPU file pairs:
+- `.chunk_pc` - CPU header: signature, bounds, texture names, render item descriptors
+- `.g_chunk_pc` - GPU data: vertex buffer + index buffer (uint16) back-to-back
 
-### Header
+### CPU Header (ChunkFileHeader, 0x00 - 0x8B)
 
 ```
 Offset  Size    Description
-0x00    4       Signature
-0x04    4       Version
-0x08    4       Flags
-0x0C    4       Object count
-0x10    12      Bounding box min (float3)
-0x1C    12      Bounding box max (float3)
-0x28    12      Origin (float3)
-0x34    4       Zone ID
-0x38    4       LOD level
-0x3C    4       Data offset
-0x40    4       Data size
+0x00    4       Signature: 0xBBCACA12
+0x04    4       Version: 121
+0x08    4       Flags: typically 14
+0x0C    4       Unknown (always 0)
+0x10    4       Section count
+0x14    0x78    Unknown (hashes, runtime pointers)
 ```
 
-### Object Types
+### Geometry Info (ChunkGeometryInfo, 0x8C - 0xEF)
 
-| Type | Description |
-|------|-------------|
-| 1 | Terrain |
-| 2 | Building |
-| 3 | Prop |
-| 4 | Collision |
-| 5 | Decal |
-| 6 | Light |
-| 7 | Particle emitter |
-| 8 | Audio source |
-| 9 | Navigation mesh |
+```
+Offset  Size    Description
+0x8C    4       GPU vertex buffer size (bytes)
+0x90    4       GPU index buffer size (bytes, 0 if no indices)
+0x94    4       Submesh/material group count
+0x98    4       Unknown
+0x9C    4       Render item count
+0xA0    4       Unknown
+0xA4    0x30    Padding/unknown
+0xD4    12      Bounding box min (float3, world-space)
+0xE0    12      Bounding box max (float3, world-space)
+0xEC    4       Unknown
+```
+
+**GPU file size** = vertex buffer size + index buffer size (verified across all chunks).
+
+### Texture Names (0x100+)
+
+```
+Offset  Size    Description
+0x100   4       Texture name count
+0x104   4       Padding (zero)
+0x108+  var     Null-terminated ASCII texture names (may have leading zero padding)
+```
+
+Texture names reference `.tga` / `.tgn` files in PEG texture packages.
+
+### GPU Data Layout (.g_chunk_pc)
+
+```
+┌────────────────────────┐ offset 0
+│    Vertex Buffer       │ (gpu_vertex_size bytes)
+├────────────────────────┤
+│    Index Buffer        │ (gpu_index_size bytes, uint16 indices)
+└────────────────────────┘
+```
+
+### Vertex Format (stride 20, most common)
+
+```
+Offset  Size    Description
+0x00    12      Position (float3, LOCAL SPACE relative to bounds center)
+0x0C    4       Packed normal (4x uint8, map [0,255] to [-1,1])
+0x10    4       UV coordinates (2x uint16)
+```
+
+**Important**: Vertex positions are in local space. To get world-space coordinates,
+add the bounding box center: `world_pos = local_pos + (bounds_min + bounds_max) / 2`
+
+Some chunks may use larger strides (24, 32) with additional attributes.
+The parser auto-detects stride by testing which keeps positions within local half-extents.
+Multi-submesh chunks (render_item_count > 1) have interleaved vertex data
+that requires parsing render item descriptors from the CPU file for proper decoding.
 
 ---
 
