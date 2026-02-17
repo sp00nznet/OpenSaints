@@ -46,7 +46,7 @@ Located in `src/formats/`, these are pure parsers with no dependencies on engine
 | VPP | `vpp.h/cpp` | Archive extraction |
 | PEG | `peg.h/cpp` | Texture packages |
 | Mesh | `mesh.h/cpp` | 3D geometry |
-| Chunk | `chunk.h/cpp` | World geometry |
+| Chunk | `chunk.h/cpp` | World geometry (CPU header + GPU vertex/index data) |
 | XTBL | `xtbl.h/cpp` | Configuration data |
 | Preload | `preload_table.h/cpp` | Asset dependencies |
 
@@ -121,16 +121,32 @@ Physics integration for:
 
 ### Game Layer
 
-#### World Manager
+#### World Manager / Streaming
 
-Handles streaming of world chunks:
+Handles streaming of world chunks based on player position:
 
 ```cpp
-WorldManager world;
-world.loadZone(zoneId);
-world.setPlayerPosition(x, y, z);
-world.update(); // Streams chunks as needed
+StreamingManager streaming;
+streaming.initialize(assetManager);
+streaming.discoverChunks();  // Quick-parses headers for real bounds
+
+// Each frame:
+streaming.update(playerPos, playerVelocity, deltaTime);
+
+// Get visible chunks for rendering
+auto visible = streaming.getVisibleChunks();
+for (auto& chunk : visible) {
+    // chunk->data().meshes contains decoded geometry
+    // chunk->data().textures contains texture name references
+}
 ```
+
+Chunk loading pipeline:
+1. `discoverChunks()` reads headers from VFS, extracts bounds at 0xD4
+2. `update()` queues chunks within load radius based on distance/priority
+3. `loadChunkSync()` reads CPU+GPU files, calls `WorldChunk::openFromMemory()`
+4. GPU vertex/index buffers are decoded with auto-stride detection
+5. Distant chunks are evicted via LRU when over memory budget
 
 #### Entity System
 

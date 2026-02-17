@@ -33,17 +33,23 @@ See [docs/development-status.md](docs/development-status.md) for detailed status
 - [x] Texture export to BMP/TGA
 - [x] Demo scene with rotating objects
 - [x] CMake build system (Windows/MSVC)
+- [x] World chunk binary format parsing (.chunk_pc / .g_chunk_pc)
+- [x] Chunk texture name extraction
+- [x] Chunk GPU geometry decoding (vertex + index buffers)
+- [x] Streaming manager with real chunk bounds from headers
+- [x] Chunk analyzer CLI tool
+- [x] Chunk viewer (SDL2+Vulkan, FPS camera)
 
 ### In Progress
 - [ ] Asset manager integration with VFS
 - [ ] Texture rendering in Vulkan shaders
 - [ ] Mesh loading and rendering
+- [ ] Multi-submesh chunk render item parsing
 
 ### Planned (Phase 1: Asset Pipeline)
 - [ ] Full VPP virtual filesystem mounting
 - [ ] Preload table parsing
 - [ ] XTBL configuration parsing
-- [ ] World chunk loading
 - [ ] Animation loading
 
 ### Planned (Phase 2+)
@@ -139,6 +145,30 @@ asset_test find-pegs ./extracted
 asset_test scan-game "C:/Games/Saints Row 2"
 ```
 
+### Chunk Analyzer
+```bash
+# Display parsed header fields
+chunk_analyzer header sr2_chunk007.chunk_pc
+
+# List texture names embedded in chunk
+chunk_analyzer textures sr2_chunk006.chunk_pc
+
+# Analyze GPU vertex/index buffer layout
+chunk_analyzer geometry sr2_chunk012.chunk_pc
+
+# Compare all chunks in a directory (signature, bounds, GPU sizes)
+chunk_analyzer compare ./temp_chunk_extract
+
+# Hex dump of key header regions
+chunk_analyzer hexdump sr2_chunk007.chunk_pc
+```
+
+### Chunk Viewer (requires renderer)
+```bash
+# Browse and render extracted chunk geometry with FPS camera
+chunk_viewer ./temp_chunk_extract
+```
+
 ## Project Structure
 
 ```
@@ -148,7 +178,7 @@ OpenSaints/
 │   │   ├── vpp.*         # VPP archive format
 │   │   ├── peg.*         # Texture packages
 │   │   ├── mesh.*        # Character/static meshes
-│   │   ├── chunk.*       # World chunks
+│   │   ├── chunk.*       # World chunks (.chunk_pc/.g_chunk_pc)
 │   │   ├── anim.*        # Animation clips
 │   │   ├── xtbl.*        # XML config tables
 │   │   └── preload_table.*
@@ -158,7 +188,7 @@ OpenSaints/
 │   │   ├── entity.*      # Entity-component system
 │   │   └── animation.*   # Animation controller
 │   ├── world/            # World management
-│   │   └── streaming.*   # Chunk streaming
+│   │   └── streaming.*   # Chunk streaming (real bounds + VFS loading)
 │   ├── render/           # Vulkan rendering
 │   │   ├── renderer.*    # Abstract renderer
 │   │   └── vulkan_backend.*
@@ -170,8 +200,11 @@ OpenSaints/
 │   │   └── script_system.* # Lua + action nodes
 │   ├── physics/          # Physics simulation
 │   │   └── physics_system.*
-│   └── platform/         # Platform abstraction
-│       └── application.* # SDL2 window/input
+│   ├── platform/         # Platform abstraction
+│   │   └── application.* # SDL2 window/input
+│   ├── chunk_analyzer.cpp # CLI tool for chunk format analysis
+│   ├── chunk_viewer.cpp  # SDL2+Vulkan chunk geometry viewer
+│   └── asset_viewer.cpp  # SDL2+Vulkan mesh/texture viewer
 ├── tools/                # Utility tools
 │   ├── vpp_extract.*     # VPP extraction
 │   ├── extract_all.py    # Batch extraction
@@ -183,8 +216,8 @@ OpenSaints/
 
 - [Development Status](docs/development-status.md) - Current progress and next steps
 - [Vulkan Renderer](docs/vulkan-renderer.md) - Implementation notes and issues solved
-- [Architecture Overview](docs/architecture.md) - System design (planned)
-- [File Formats Reference](docs/formats.md) - SR2 format documentation (planned)
+- [Architecture Overview](docs/architecture.md) - System design and streaming pipeline
+- [File Formats Reference](docs/formats.md) - SR2 format documentation (VPP, PEG, Chunk verified)
 
 ## Technical Details
 
@@ -198,7 +231,7 @@ OpenSaints/
 | `.cvbm_pc`/`.gvbm_pc` | Textures | **Working** - parse, DXT decode, export |
 | `.cmesh_pc`/`.gcmesh_pc` | Character mesh | Skeleton code |
 | `.smesh_pc`/`.gsmesh_pc` | Static mesh | Skeleton code |
-| `.chunk_pc` | World geometry | Skeleton code |
+| `.chunk_pc`/`.g_chunk_pc` | World geometry | **Working** - header, bounds, textures, GPU decode |
 | `.xtbl` | Config tables | Skeleton code |
 | `.anim_pc` | Animations | Skeleton code |
 | `.vint_doc` | UI documents | Skeleton code |

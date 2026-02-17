@@ -220,6 +220,11 @@ After building:
 ```
 build/
 ├── opensaints           # Main executable
+├── opensaints_demo      # Demo scene (requires renderer)
+├── asset_test           # Asset inspection/extraction CLI
+├── asset_viewer         # 3D mesh/texture browser (requires renderer)
+├── chunk_analyzer       # Chunk format analysis CLI
+├── chunk_viewer         # Chunk geometry viewer (requires renderer)
 ├── vpp_extract          # VPP extraction tool
 └── opensaints_core.a    # Static library (or .lib on Windows)
 ```
