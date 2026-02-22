@@ -360,10 +360,10 @@ bool WorldChunk::parseGeometry(const std::vector<uint8_t>& gpuData) {
     uint32_t renderItemCount = m_data.render_item_count;
     uint32_t totalIndexCount = ibSize > 0 ? ibSize / 2 : 0;
 
-    // Try to build per-render-item submeshes by splitting geometry evenly
-    // Each render item gets a proportional share of vertices and indices
+    // TODO: Read actual render item table from chunk binary for proper per-submesh splits.
+    // For now, use single-submesh path which correctly uses all vertices + indices together.
     bool multiSubmeshOk = false;
-    if (renderItemCount > 1 && totalVertCount > 0) {
+    if (false && renderItemCount > 1 && totalVertCount > 0) {
         // Populate render_items with even splits as best-effort
         m_data.render_items.clear();
         m_data.render_items.resize(renderItemCount);

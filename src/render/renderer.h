@@ -186,6 +186,9 @@ public:
     virtual void draw(uint32_t vertexCount, uint32_t firstVertex = 0) = 0;
     virtual void drawIndexed(uint32_t indexCount, uint32_t firstIndex = 0, int32_t vertexOffset = 0) = 0;
 
+    // Synchronization
+    virtual void waitIdle() = 0;
+
     // Stats and info
     virtual RenderStats getStats() const = 0;
     virtual RenderCaps getCaps() const = 0;

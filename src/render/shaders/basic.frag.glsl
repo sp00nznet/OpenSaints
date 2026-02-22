@@ -27,6 +27,10 @@ void main() {
     // Sample texture
     vec4 texColor = texture(texSampler, fragTexCoord);
 
+    // When no texture is bound the sampler returns black/transparent.
+    // Fall back to vertex color so untextured geometry is still visible.
+    vec4 baseColor = texColor.a > 0.01 ? texColor * fragColor : fragColor;
+
     // Basic lighting
     vec3 normal = normalize(fragNormal);
     vec3 lightDir = normalize(-ubo.lightDirection.xyz);
@@ -40,7 +44,7 @@ void main() {
 
     // Combine
     vec3 lighting = ambient + diffuse;
-    vec3 result = lighting * texColor.rgb * fragColor.rgb;
+    vec3 result = lighting * baseColor.rgb;
 
-    outColor = vec4(result, texColor.a * fragColor.a);
+    outColor = vec4(result, baseColor.a);
 }

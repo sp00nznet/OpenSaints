@@ -10,6 +10,8 @@
 #include <typeindex>
 #include <functional>
 
+#include "render/renderer.h"
+
 namespace opensaints {
 
 // Forward declarations
@@ -228,16 +230,28 @@ private:
 
 // Common component types
 
-// Mesh renderer component
+// Per-submesh rendering data
+struct SubmeshGPU {
+    uint32_t indexCount = 0;
+    uint32_t indexStart = 0;
+    int32_t vertexOffset = 0;
+    uint32_t vertexCount = 0;
+    uint32_t vertexStart = 0;
+    TextureHandle texture = InvalidTexture;
+};
+
+// Mesh renderer component — holds GPU resource handles for rendering
 class MeshRendererComponent : public Component {
 public:
     ComponentTypeId getTypeId() const override { return getComponentTypeId<MeshRendererComponent>(); }
 
     std::string meshName;
-    std::string materialName;
-    bool castShadows = true;
-    bool receiveShadows = true;
     bool visible = true;
+
+    // GPU resources
+    BufferHandle vertexBuffer = InvalidBuffer;
+    BufferHandle indexBuffer = InvalidBuffer;
+    std::vector<SubmeshGPU> submeshes;
 };
 
 // Collider component (placeholder)
@@ -327,5 +341,12 @@ public:
     virtual void onTriggerEnter(Entity* other) {}
     virtual void onTriggerExit(Entity* other) {}
 };
+
+// Forward declaration
+class RenderQueue;
+
+// Collect all visible MeshRendererComponents into a RenderQueue
+// Uses each entity's Transform to produce per-object model matrices
+void collectRenderItems(EntityManager& manager, RenderQueue& queue);
 
 } // namespace opensaints

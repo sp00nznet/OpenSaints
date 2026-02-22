@@ -72,6 +72,8 @@ set(RENDER_SOURCES
     render/renderer.h
     render/vulkan_backend.cpp
     render/vulkan_backend.h
+    render/render_queue.cpp
+    render/render_queue.h
 )
 
 # Combine all sources

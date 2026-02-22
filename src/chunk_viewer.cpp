@@ -7,6 +7,8 @@
 #include "render/renderer.h"
 #include "formats/chunk.h"
 #include "formats/mesh.h"
+#include "formats/peg.h"
+#include "render/render_queue.h"
 
 #include <iostream>
 #include <vector>
@@ -15,16 +17,28 @@
 #include <algorithm>
 #include <cmath>
 #include <memory>
+#include <unordered_map>
 
 namespace fs = std::filesystem;
 
 namespace opensaints {
+
+// Per-submesh draw range for textured rendering
+struct SubmeshDrawRange {
+    uint32_t indexStart = 0;
+    uint32_t indexCount = 0;
+    uint32_t vertexStart = 0;
+    uint32_t vertexCount = 0;
+    int32_t materialIndex = -1;
+    TextureHandle texture = InvalidTexture;
+};
 
 struct LoadedChunk {
     std::string filename;
     WorldChunk chunk;
     std::vector<RenderVertex> vertices;
     std::vector<uint32_t> indices;
+    std::vector<SubmeshDrawRange> submeshRanges;
     BufferHandle vertexBuffer = InvalidBuffer;
     BufferHandle indexBuffer = InvalidBuffer;
 };
@@ -44,6 +58,8 @@ private:
     void nextChunk();
     void prevChunk();
     void printCurrentChunk();
+    void loadPegArchives(const fs::path& dir);
+    TextureHandle findOrCreateTexture(const std::string& textureName);
 
     Application* m_app = nullptr;
     Renderer* m_renderer = nullptr;
@@ -51,9 +67,16 @@ private:
     // Chunk data
     fs::path m_chunkDir;
     std::vector<fs::path> m_chunkFiles;
+    std::vector<size_t> m_geometryIndices;  // Indices into m_chunkFiles that have geometry
     size_t m_currentIndex = 0;
+    size_t m_geoNavPos = 0;  // Current position in m_geometryIndices
     LoadedChunk m_current;
     bool m_loaded = false;
+
+    // PEG texture cache
+    std::vector<std::shared_ptr<PegArchive>> m_pegArchives;
+    std::unordered_map<std::string, TextureHandle> m_textureCache;
+    bool m_pegsLoaded = false;
 
     // FPS camera
     float m_camX = 0, m_camY = 50, m_camZ = 0;
@@ -62,6 +85,9 @@ private:
     float m_moveSpeed = 200.0f;
     float m_lookSpeed = 0.003f;
     bool m_mouseCaptured = false;
+
+    // Render queue
+    RenderQueue m_renderQueue;
 
     // Input edge detection
     bool m_prevLeftKey = false;
@@ -85,9 +111,32 @@ bool ChunkViewerScene::initialize(Application* app, Renderer* renderer, const st
     std::cout << "===============================\n\n";
 
     scanDirectory(chunkPath);
-    std::cout << "Found " << m_chunkFiles.size() << " chunk files\n\n";
+    std::cout << "Found " << m_chunkFiles.size() << " chunk files\n";
 
-    if (!m_chunkFiles.empty()) {
+    // Pre-scan: quickly open each chunk to find which ones have geometry
+    std::cout << "Pre-scanning for chunks with geometry...\n";
+    for (size_t i = 0; i < m_chunkFiles.size(); ++i) {
+        WorldChunk probe;
+        if (probe.open(m_chunkFiles[i])) {
+            const auto& d = probe.data();
+            if (!d.meshes.empty() && !d.meshes[0]->submeshes.empty()
+                && !d.meshes[0]->submeshes[0].vertices.empty()) {
+                m_geometryIndices.push_back(i);
+            }
+        }
+    }
+    std::cout << "  " << m_geometryIndices.size() << " chunks have geometry (of "
+              << m_chunkFiles.size() << " total)\n";
+
+    loadPegArchives(chunkPath);
+    std::cout << "\n";
+
+    // Load the first chunk with geometry
+    if (!m_geometryIndices.empty()) {
+        m_geoNavPos = 0;
+        loadChunk(m_geometryIndices[0]);
+    } else if (!m_chunkFiles.empty()) {
+        std::cout << "Warning: no chunks with geometry found!\n";
         loadChunk(0);
     }
 
@@ -156,9 +205,18 @@ bool ChunkViewerScene::loadChunk(size_t index) {
         return false;
     }
 
-    // Convert all submeshes to render vertices
+    // Convert all submeshes to render vertices, tracking per-submesh ranges
     for (const auto& submesh : mesh.submeshes) {
-        uint32_t baseVertex = static_cast<uint32_t>(m_current.vertices.size());
+        SubmeshDrawRange range;
+        range.vertexStart = static_cast<uint32_t>(m_current.vertices.size());
+        range.indexStart = static_cast<uint32_t>(m_current.indices.size());
+        range.materialIndex = submesh.material_index;
+
+        // Resolve texture for this submesh
+        if (submesh.material_index >= 0 &&
+            submesh.material_index < static_cast<int32_t>(data.textures.size())) {
+            range.texture = findOrCreateTexture(data.textures[submesh.material_index]);
+        }
 
         for (const auto& v : submesh.vertices) {
             RenderVertex rv;
@@ -171,27 +229,48 @@ bool ChunkViewerScene::loadChunk(size_t index) {
             rv.texcoord[0] = v.texcoord0.u;
             rv.texcoord[1] = v.texcoord0.v;
 
-            // Normal-as-color visualization
-            uint8_t r = static_cast<uint8_t>((v.normal.x * 0.5f + 0.5f) * 255);
-            uint8_t g = static_cast<uint8_t>((v.normal.y * 0.5f + 0.5f) * 255);
-            uint8_t b = static_cast<uint8_t>((v.normal.z * 0.5f + 0.5f) * 255);
-            rv.color = 0xFF000000 | (b << 16) | (g << 8) | r;
+            // Normal-as-color for untextured, white for textured
+            if (range.texture != InvalidTexture) {
+                rv.color = 0xFFFFFFFF;
+            } else {
+                uint8_t r = static_cast<uint8_t>((v.normal.x * 0.5f + 0.5f) * 255);
+                uint8_t g = static_cast<uint8_t>((v.normal.y * 0.5f + 0.5f) * 255);
+                uint8_t b = static_cast<uint8_t>((v.normal.z * 0.5f + 0.5f) * 255);
+                rv.color = 0xFF000000 | (b << 16) | (g << 8) | r;
+            }
 
             m_current.vertices.push_back(rv);
         }
 
+        uint32_t baseVertex = range.vertexStart;
         for (uint32_t idx : submesh.indices) {
             m_current.indices.push_back(baseVertex + idx);
         }
+
+        range.vertexCount = static_cast<uint32_t>(submesh.vertices.size());
+        range.indexCount = static_cast<uint32_t>(submesh.indices.size());
+        m_current.submeshRanges.push_back(range);
     }
 
     // Upload to GPU
     uploadCurrentChunk();
 
-    // Move camera to chunk center, slightly above
-    m_camX = (data.bounds_min[0] + data.bounds_max[0]) * 0.5f;
-    m_camY = data.bounds_max[1] + 50.0f;
-    m_camZ = (data.bounds_min[2] + data.bounds_max[2]) * 0.5f;
+    // Position camera to see the whole chunk
+    float cx = (data.bounds_min[0] + data.bounds_max[0]) * 0.5f;
+    float cy = (data.bounds_min[1] + data.bounds_max[1]) * 0.5f;
+    float cz = (data.bounds_min[2] + data.bounds_max[2]) * 0.5f;
+    float extentX = data.bounds_max[0] - data.bounds_min[0];
+    float extentY = data.bounds_max[1] - data.bounds_min[1];
+    float extentZ = data.bounds_max[2] - data.bounds_min[2];
+    float maxExtent = std::max({extentX, extentY, extentZ, 10.0f});
+
+    // Pull camera back from center by the size of the chunk, looking toward center
+    m_camX = cx;
+    m_camY = cy + maxExtent * 0.5f;
+    m_camZ = cz - maxExtent * 0.8f;
+    m_camYaw = 0.0f;
+    m_camPitch = -0.4f;  // Look slightly downward
+    m_moveSpeed = std::max(50.0f, maxExtent * 0.5f);
 
     m_loaded = true;
     printCurrentChunk();
@@ -217,6 +296,12 @@ void ChunkViewerScene::uploadCurrentChunk() {
 }
 
 void ChunkViewerScene::destroyGPUResources() {
+    if (m_current.vertexBuffer == InvalidBuffer && m_current.indexBuffer == InvalidBuffer)
+        return;
+
+    // Wait for GPU to finish using the buffers before destroying them
+    m_renderer->waitIdle();
+
     if (m_current.vertexBuffer != InvalidBuffer) {
         m_renderer->destroyBuffer(m_current.vertexBuffer);
         m_current.vertexBuffer = InvalidBuffer;
@@ -228,18 +313,20 @@ void ChunkViewerScene::destroyGPUResources() {
 }
 
 void ChunkViewerScene::nextChunk() {
-    if (m_chunkFiles.empty()) return;
-    loadChunk((m_currentIndex + 1) % m_chunkFiles.size());
+    if (m_geometryIndices.empty()) return;
+    m_geoNavPos = (m_geoNavPos + 1) % m_geometryIndices.size();
+    loadChunk(m_geometryIndices[m_geoNavPos]);
 }
 
 void ChunkViewerScene::prevChunk() {
-    if (m_chunkFiles.empty()) return;
-    loadChunk((m_currentIndex + m_chunkFiles.size() - 1) % m_chunkFiles.size());
+    if (m_geometryIndices.empty()) return;
+    m_geoNavPos = (m_geoNavPos + m_geometryIndices.size() - 1) % m_geometryIndices.size();
+    loadChunk(m_geometryIndices[m_geoNavPos]);
 }
 
 void ChunkViewerScene::printCurrentChunk() {
     const auto& data = m_current.chunk.data();
-    std::cout << "  [" << (m_currentIndex + 1) << "/" << m_chunkFiles.size() << "] "
+    std::cout << "  [" << (m_geoNavPos + 1) << "/" << m_geometryIndices.size() << "] "
               << m_current.filename << "\n";
     std::cout << "    Bounds: (" << data.bounds_min[0] << ", " << data.bounds_min[1]
               << ", " << data.bounds_min[2] << ") - ("
@@ -371,20 +458,125 @@ void ChunkViewerScene::render() {
     uniforms.ambientColor[2] = 0.45f;
     uniforms.ambientColor[3] = 1.0f;
 
-    m_renderer->setUniforms(uniforms);
+    // Build render queue from submeshes
+    m_renderQueue.clear();
 
-    // Draw chunk
-    m_renderer->bindVertexBuffer(m_current.vertexBuffer);
-    if (m_current.indexBuffer != InvalidBuffer && !m_current.indices.empty()) {
-        m_renderer->bindIndexBuffer(m_current.indexBuffer);
-        m_renderer->drawIndexed(static_cast<uint32_t>(m_current.indices.size()));
+    if (!m_current.submeshRanges.empty()) {
+        for (const auto& range : m_current.submeshRanges) {
+            if (range.indexCount == 0 && range.vertexCount == 0) continue;
+
+            RenderItem item;
+            item.vertexBuffer = m_current.vertexBuffer;
+            item.indexBuffer = m_current.indexBuffer;
+            item.texture = range.texture;
+            item.indexCount = range.indexCount;
+            item.indexStart = range.indexStart;
+            item.vertexCount = range.vertexCount;
+            item.vertexStart = range.vertexStart;
+            RenderMath::identity(item.modelMatrix);
+
+            m_renderQueue.submit(item);
+        }
     } else {
-        m_renderer->draw(static_cast<uint32_t>(m_current.vertices.size()));
+        // Fallback: single draw for the whole chunk
+        RenderItem item;
+        item.vertexBuffer = m_current.vertexBuffer;
+        item.indexBuffer = m_current.indexBuffer;
+        item.texture = InvalidTexture;
+        if (m_current.indexBuffer != InvalidBuffer) {
+            item.indexCount = static_cast<uint32_t>(m_current.indices.size());
+        } else {
+            item.vertexCount = static_cast<uint32_t>(m_current.vertices.size());
+        }
+        RenderMath::identity(item.modelMatrix);
+
+        m_renderQueue.submit(item);
     }
+
+    // Flush sorted draw calls
+    m_renderQueue.flush(m_renderer, uniforms);
+}
+
+void ChunkViewerScene::loadPegArchives(const fs::path& dir) {
+    if (m_pegsLoaded) return;
+    m_pegsLoaded = true;
+
+    std::cout << "Scanning for texture archives in " << dir << "...\n";
+
+    size_t count = 0;
+    for (const auto& entry : fs::directory_iterator(dir)) {
+        if (!entry.is_regular_file()) continue;
+        std::string filename = entry.path().filename().string();
+
+        // Match .cpeg_pc or .peg_pc files (but not .g_peg_pc / .gpeg_pc GPU files)
+        std::string ext = entry.path().extension().string();
+        bool isCpeg = (filename.size() > 8 && filename.substr(filename.size() - 8) == ".cpeg_pc");
+        bool isPeg = (ext == ".peg_pc" && filename.find(".g_peg_pc") == std::string::npos
+                      && filename.find(".gpeg_pc") == std::string::npos);
+
+        if (!isCpeg && !isPeg) continue;
+
+        auto peg = std::make_shared<PegArchive>();
+        if (peg->open(entry.path())) {
+            std::cout << "  Loaded PEG: " << filename << " (" << peg->textureCount() << " textures)\n";
+            m_pegArchives.push_back(peg);
+            count++;
+        }
+    }
+
+    std::cout << "Loaded " << count << " PEG archives with textures available\n";
+}
+
+TextureHandle ChunkViewerScene::findOrCreateTexture(const std::string& textureName) {
+    if (textureName.empty()) return InvalidTexture;
+
+    // Check cache first
+    auto it = m_textureCache.find(textureName);
+    if (it != m_textureCache.end()) return it->second;
+
+    // Also try with .tga stripped (chunk stores "foo.tga", PEG may store "foo.tga" or "foo")
+    std::string baseName = textureName;
+    if (baseName.size() > 4 && baseName.substr(baseName.size() - 4) == ".tga") {
+        baseName = baseName.substr(0, baseName.size() - 4);
+    }
+
+    // Search all loaded PEG archives
+    for (auto& peg : m_pegArchives) {
+        const PegTexture* tex = peg->findTexture(textureName);
+        if (!tex) tex = peg->findTexture(baseName);
+        if (!tex) continue;
+
+        // Found it — extract as RGBA
+        std::vector<uint8_t> rgba = peg->extractRGBA(textureName);
+        if (rgba.empty()) rgba = peg->extractRGBA(baseName);
+        if (rgba.empty()) continue;
+
+        // Create GPU texture
+        TextureHandle handle = m_renderer->createTexture(
+            tex->width, tex->height, TextureFormat::RGBA8, rgba.data());
+
+        if (handle != InvalidTexture) {
+            m_textureCache[textureName] = handle;
+            return handle;
+        }
+    }
+
+    // Not found — cache as invalid to avoid repeated searches
+    m_textureCache[textureName] = InvalidTexture;
+    return InvalidTexture;
 }
 
 void ChunkViewerScene::shutdown() {
     destroyGPUResources();
+
+    // Destroy cached GPU textures
+    for (auto& [name, handle] : m_textureCache) {
+        if (handle != InvalidTexture) {
+            m_renderer->destroyTexture(handle);
+        }
+    }
+    m_textureCache.clear();
+    m_pegArchives.clear();
 }
 
 } // namespace opensaints

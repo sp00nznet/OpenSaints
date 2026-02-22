@@ -666,7 +666,7 @@ bool VulkanRenderer::createDefaultResources() {
     pipelineDesc.fragmentShader = m_defaultFragShader;
     pipelineDesc.depthTest = true;
     pipelineDesc.depthWrite = true;
-    pipelineDesc.cullMode = CullMode::Back;
+    pipelineDesc.cullMode = CullMode::None;
 
     m_defaultPipeline = createPipeline(pipelineDesc);
     if (m_defaultPipeline == InvalidPipeline) {
@@ -1251,6 +1251,12 @@ void VulkanRenderer::drawIndexed(uint32_t indexCount, uint32_t firstIndex, int32
     vkCmdDrawIndexed(m_commandBuffers[m_currentFrame], indexCount, 1, firstIndex, vertexOffset, 0);
     m_stats.drawCalls++;
     m_stats.triangles += indexCount / 3;
+}
+
+void VulkanRenderer::waitIdle() {
+    if (m_device) {
+        vkDeviceWaitIdle(m_device);
+    }
 }
 
 RenderStats VulkanRenderer::getStats() const {

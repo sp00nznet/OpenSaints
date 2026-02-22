@@ -1,4 +1,5 @@
 #include "entity.h"
+#include "render/render_queue.h"
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -383,6 +384,50 @@ void CameraComponent::getViewMatrix(float* matrix) const {
     matrix[13] = -(up[0] * t.position[0] + up[1] * t.position[1] + up[2] * t.position[2]);
     matrix[14] = forward[0] * t.position[0] + forward[1] * t.position[1] + forward[2] * t.position[2];
     matrix[15] = 1.0f;
+}
+
+// Collect render items from all visible entities with MeshRendererComponent
+void collectRenderItems(EntityManager& manager, RenderQueue& queue) {
+    auto entities = manager.getEntitiesWithComponent<MeshRendererComponent>();
+
+    for (Entity* entity : entities) {
+        if (!entity->isEnabled()) continue;
+
+        auto* mesh = entity->getComponent<MeshRendererComponent>();
+        if (!mesh || !mesh->visible || mesh->vertexBuffer == InvalidBuffer) continue;
+
+        // Compute model matrix from entity transform
+        float modelMatrix[16];
+        entity->transform().getMatrix(modelMatrix);
+
+        if (!mesh->submeshes.empty()) {
+            for (const auto& sub : mesh->submeshes) {
+                if (sub.indexCount == 0 && sub.vertexCount == 0) continue;
+
+                RenderItem item;
+                item.vertexBuffer = mesh->vertexBuffer;
+                item.indexBuffer = mesh->indexBuffer;
+                item.texture = sub.texture;
+                item.indexCount = sub.indexCount;
+                item.indexStart = sub.indexStart;
+                item.vertexOffset = sub.vertexOffset;
+                item.vertexCount = sub.vertexCount;
+                item.vertexStart = sub.vertexStart;
+                std::memcpy(item.modelMatrix, modelMatrix, sizeof(float) * 16);
+
+                queue.submit(item);
+            }
+        } else {
+            // Single draw for the whole mesh (no submeshes)
+            RenderItem item;
+            item.vertexBuffer = mesh->vertexBuffer;
+            item.indexBuffer = mesh->indexBuffer;
+            item.texture = InvalidTexture;
+            std::memcpy(item.modelMatrix, modelMatrix, sizeof(float) * 16);
+
+            queue.submit(item);
+        }
+    }
 }
 
 } // namespace opensaints

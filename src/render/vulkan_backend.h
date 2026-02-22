@@ -106,6 +106,8 @@ public:
     void draw(uint32_t vertexCount, uint32_t firstVertex) override;
     void drawIndexed(uint32_t indexCount, uint32_t firstIndex, int32_t vertexOffset) override;
 
+    void waitIdle() override;
+
     RenderStats getStats() const override;
     RenderCaps getCaps() const override;
 
