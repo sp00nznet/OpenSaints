@@ -113,6 +113,10 @@ public:
     bool open(const std::filesystem::path& cpuPath,
               const std::filesystem::path& gpuPath);
 
+    // Open from memory buffers (for VFS integration)
+    bool openFromMemory(const uint8_t* cpuData, size_t cpuSize,
+                        const uint8_t* gpuData, size_t gpuSize);
+
     // Close the archive
     void close();
 
@@ -131,7 +135,7 @@ public:
     std::vector<uint8_t> extractRGBA(const std::string& name);
 
     // Check if open
-    bool isOpen() const { return m_gpuFile.is_open(); }
+    bool isOpen() const { return m_gpuFile.is_open() || !m_gpuDataBuffer.empty(); }
     size_t textureCount() const { return m_textures.size(); }
 
     // Get paths
@@ -142,6 +146,7 @@ private:
     std::filesystem::path m_cpuPath;
     std::filesystem::path m_gpuPath;
     std::ifstream m_gpuFile;
+    std::vector<uint8_t> m_gpuDataBuffer; // For memory-backed archives (VFS)
     PegHeader m_header{};
     std::vector<PegTexture> m_textures;
 

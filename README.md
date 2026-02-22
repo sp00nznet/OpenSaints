@@ -21,7 +21,7 @@ OpenSaints is a project to create an open-source engine compatible with Saints R
 
 ## Current Status
 
-**Early Development** - Core rendering works, asset loading in progress.
+**Early Development** - Asset pipeline complete, rendering integration in progress.
 
 See [docs/development-status.md](docs/development-status.md) for detailed status.
 
@@ -29,31 +29,25 @@ See [docs/development-status.md](docs/development-status.md) for detailed status
 - [x] Vulkan rendering backend with basic geometry
 - [x] SDL2 window/input handling
 - [x] VPP archive extraction (Python and C++ tools)
-- [x] PEG texture parsing and DXT decompression
+- [x] PEG texture parsing and DXT decompression (disk + memory/VFS)
 - [x] Texture export to BMP/TGA
 - [x] Demo scene with rotating objects
 - [x] CMake build system (Windows/MSVC)
 - [x] World chunk binary format parsing (.chunk_pc / .g_chunk_pc)
 - [x] Chunk texture name extraction
-- [x] Chunk GPU geometry decoding (vertex + index buffers)
+- [x] Chunk GPU geometry decoding with multi-submesh support
 - [x] Streaming manager with real chunk bounds from headers
 - [x] Chunk analyzer CLI tool
 - [x] Chunk viewer (SDL2+Vulkan, FPS camera)
+- [x] Asset manager VFS integration (PEG + mesh from-memory loading)
+- [x] Vulkan texture binding with descriptor sets and compiled SPIR-V shaders
+- [x] Character mesh and static mesh from-memory parsing
+- [x] Animation keyframe parsing (Full14 + CompactRot6 compressed formats)
+- [x] Full VPP virtual filesystem mounting
+- [x] Preload table parsing
+- [x] XTBL configuration parsing
 
-### In Progress
-- [ ] Asset manager integration with VFS
-- [ ] Texture rendering in Vulkan shaders
-- [ ] Mesh loading and rendering
-- [ ] Multi-submesh chunk render item parsing
-
-### Planned (Phase 1: Asset Pipeline)
-- [ ] Full VPP virtual filesystem mounting
-- [ ] Preload table parsing
-- [ ] XTBL configuration parsing
-- [ ] Animation loading
-
-### Planned (Phase 2+)
-- [ ] World streaming
+### Planned
 - [ ] Entity-component system
 - [ ] Audio (OpenAL)
 - [ ] UI system
@@ -229,11 +223,11 @@ OpenSaints/
 | `.peg_pc`/`.g_peg_pc` | Textures | **Working** - parse, DXT decode, export |
 | `.cpeg_pc`/`.gpeg_pc` | Textures | **Working** - parse, DXT decode, export |
 | `.cvbm_pc`/`.gvbm_pc` | Textures | **Working** - parse, DXT decode, export |
-| `.cmesh_pc`/`.gcmesh_pc` | Character mesh | Skeleton code |
-| `.smesh_pc`/`.gsmesh_pc` | Static mesh | Skeleton code |
-| `.chunk_pc`/`.g_chunk_pc` | World geometry | **Working** - header, bounds, textures, GPU decode |
-| `.xtbl` | Config tables | Skeleton code |
-| `.anim_pc` | Animations | Skeleton code |
+| `.cmesh_pc`/`.gcmesh_pc` | Character mesh | **Working** - disk + memory, skinned vertices |
+| `.smesh_pc`/`.gsmesh_pc` | Static mesh | **Working** - disk + memory parsing |
+| `.chunk_pc`/`.g_chunk_pc` | World geometry | **Working** - header, bounds, textures, multi-submesh GPU decode |
+| `.xtbl` | Config tables | **Working** - full DOM-style XML parser |
+| `.anim_pc` | Animations | **Working** - keyframe parsing, bone tracks |
 | `.vint_doc` | UI documents | Skeleton code |
 
 ### Engine Architecture

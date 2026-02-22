@@ -202,22 +202,119 @@ void WorldChunk::decodePackedNormal(uint32_t packed, float& nx, float& ny, float
     }
 }
 
+// Detect the best vertex stride for a range of vertex data
+static int detectVertexStride(const uint8_t* vertexData, uint32_t dataSize,
+                              float halfExtX, float halfExtY, float halfExtZ) {
+    int bestStride = 20;
+    int strideCandidates[] = {20, 24, 28, 32, 36, 40};
+    int bestScore = -1;
+
+    for (int stride : strideCandidates) {
+        uint32_t vertCount = dataSize / stride;
+        if (vertCount == 0 || vertCount > 10000000) continue;
+
+        int inBounds = 0;
+        int checkCount = std::min(vertCount, 200u);
+        for (int i = 0; i < checkCount; i++) {
+            size_t off = static_cast<size_t>(i) * stride;
+            if (off + 12 > dataSize) break;
+
+            float x, y, z;
+            std::memcpy(&x, vertexData + off, 4);
+            std::memcpy(&y, vertexData + off + 4, 4);
+            std::memcpy(&z, vertexData + off + 8, 4);
+
+            if (std::isfinite(x) && std::isfinite(y) && std::isfinite(z) &&
+                std::abs(x) < halfExtX && std::abs(y) < halfExtY && std::abs(z) < halfExtZ) {
+                inBounds++;
+            }
+        }
+
+        if (inBounds > bestScore) {
+            bestScore = inBounds;
+            bestStride = stride;
+        }
+    }
+    return bestStride;
+}
+
+// Decode vertices from a vertex buffer region into a Submesh
+static void decodeVertexRange(const uint8_t* vbData, uint32_t vbSize,
+                              uint32_t vertStart, uint32_t vertCount, int stride,
+                              float cx, float cy, float cz,
+                              Submesh& submesh) {
+    uint32_t maxVerts = vbSize / stride;
+    uint32_t endVert = std::min(vertStart + vertCount, maxVerts);
+
+    submesh.vertices.reserve(endVert - vertStart);
+
+    for (uint32_t i = vertStart; i < endVert; i++) {
+        size_t off = static_cast<size_t>(i) * stride;
+        if (off + 12 > vbSize) break;
+
+        Vertex v;
+        float lx, ly, lz;
+        std::memcpy(&lx, vbData + off, 4);
+        std::memcpy(&ly, vbData + off + 4, 4);
+        std::memcpy(&lz, vbData + off + 8, 4);
+
+        if (!std::isfinite(lx) || !std::isfinite(ly) || !std::isfinite(lz)) {
+            // Push a zero vertex to keep index mapping intact
+            submesh.vertices.push_back(v);
+            continue;
+        }
+
+        v.position.x = lx + cx;
+        v.position.y = ly + cy;
+        v.position.z = lz + cz;
+
+        if (stride >= 16 && off + 16 <= vbSize) {
+            uint32_t packedNormal;
+            std::memcpy(&packedNormal, vbData + off + 12, 4);
+            WorldChunk::decodePackedNormal(packedNormal, v.normal.x, v.normal.y, v.normal.z);
+        }
+
+        if (stride >= 20 && off + 20 <= vbSize) {
+            uint16_t u16, v16;
+            std::memcpy(&u16, vbData + off + 16, 2);
+            std::memcpy(&v16, vbData + off + 18, 2);
+            v.texcoord0.u = u16 / 1024.0f;
+            v.texcoord0.v = v16 / 1024.0f;
+        }
+
+        submesh.vertices.push_back(v);
+    }
+}
+
+// Decode index range, rebasing indices relative to a vertex start offset
+static void decodeIndexRange(const uint8_t* ibData, uint32_t ibSize,
+                             uint32_t idxStart, uint32_t idxCount,
+                             uint32_t vertStart, uint32_t localVertCount,
+                             Submesh& submesh) {
+    submesh.indices.reserve(idxCount);
+    for (uint32_t i = idxStart; i < idxStart + idxCount; i++) {
+        if (i * 2 + 2 > ibSize) break;
+        uint16_t idx;
+        std::memcpy(&idx, ibData + i * 2, 2);
+        // Rebase: original index is absolute in the VB, convert to submesh-local
+        if (idx >= vertStart && idx < vertStart + localVertCount) {
+            submesh.indices.push_back(static_cast<uint32_t>(idx - vertStart));
+        }
+    }
+}
+
 bool WorldChunk::parseGeometry(const std::vector<uint8_t>& gpuData) {
     if (gpuData.empty()) return false;
 
     uint32_t vbSize = m_data.gpu_vertex_size;
     uint32_t ibSize = m_data.gpu_index_size;
 
-    // Validate sizes against actual GPU file
     uint32_t totalExpected = vbSize + ibSize;
     if (totalExpected == 0) {
-        // No geometry in this chunk
         return true;
     }
 
-    // Allow slight mismatch (some chunks may have padding)
     if (gpuData.size() < totalExpected) {
-        // Fall back: treat entire GPU data as vertex buffer
         vbSize = static_cast<uint32_t>(gpuData.size());
         ibSize = 0;
     }
@@ -232,53 +329,18 @@ bool WorldChunk::parseGeometry(const std::vector<uint8_t>& gpuData) {
                                       gpuData.begin() + vbSize + ibSize);
     }
 
-    // Vertex positions are in LOCAL SPACE relative to bounds center.
-    // For stride detection, check if position magnitudes are plausible
-    // (within the half-extents of the bounding box + generous padding).
     float halfExtX = (m_data.bounds_max[0] - m_data.bounds_min[0]) * 0.5f + 500.0f;
     float halfExtY = (m_data.bounds_max[1] - m_data.bounds_min[1]) * 0.5f + 500.0f;
     float halfExtZ = (m_data.bounds_max[2] - m_data.bounds_min[2]) * 0.5f + 500.0f;
 
-    // Determine best vertex stride by testing which produces valid float3 positions
-    int bestStride = 20; // Default: float3 pos + uint32 normal + uint16x2 UV
-    int strideCandidates[] = {20, 24, 28, 32, 36, 40};
+    int bestStride = detectVertexStride(m_data.gpu_vertex_data.data(), vbSize,
+                                        halfExtX, halfExtY, halfExtZ);
 
-    int bestScore = -1;
-    for (int stride : strideCandidates) {
-        uint32_t vertCount = vbSize / stride;
-        if (vertCount == 0 || vertCount > 10000000) continue;
-
-        int inBounds = 0;
-        int checkCount = std::min(vertCount, 200u);
-        for (int i = 0; i < checkCount; i++) {
-            size_t off = static_cast<size_t>(i) * stride;
-            if (off + 12 > m_data.gpu_vertex_data.size()) break;
-
-            float x, y, z;
-            std::memcpy(&x, m_data.gpu_vertex_data.data() + off, 4);
-            std::memcpy(&y, m_data.gpu_vertex_data.data() + off + 4, 4);
-            std::memcpy(&z, m_data.gpu_vertex_data.data() + off + 8, 4);
-
-            // Check if position is finite and within local-space half-extents
-            if (std::isfinite(x) && std::isfinite(y) && std::isfinite(z) &&
-                std::abs(x) < halfExtX && std::abs(y) < halfExtY && std::abs(z) < halfExtZ) {
-                inBounds++;
-            }
-        }
-
-        if (inBounds > bestScore) {
-            bestScore = inBounds;
-            bestStride = stride;
-        }
+    uint32_t totalVertCount = vbSize / bestStride;
+    if (totalVertCount == 0) {
+        return true;
     }
 
-    // Build mesh data - truncate to whole vertex count
-    uint32_t vertexCount = vbSize / bestStride;
-    if (vertexCount == 0) {
-        return true; // No geometry to parse
-    }
-
-    // Bounds center used to offset local-space vertices to world-space
     float centerX = (m_data.bounds_min[0] + m_data.bounds_max[0]) * 0.5f;
     float centerY = (m_data.bounds_min[1] + m_data.bounds_max[1]) * 0.5f;
     float centerZ = (m_data.bounds_min[2] + m_data.bounds_max[2]) * 0.5f;
@@ -295,82 +357,140 @@ bool WorldChunk::parseGeometry(const std::vector<uint8_t>& gpuData) {
     float dz = m_data.bounds_max[2] - m_data.bounds_min[2];
     mesh->bounding_radius = std::sqrt(dx*dx + dy*dy + dz*dz) * 0.5f;
 
-    // Decode vertices
-    Submesh submesh;
-    submesh.name = m_data.name + "_geo";
-    submesh.material_index = 0;
-    submesh.vertices.reserve(vertexCount);
+    uint32_t renderItemCount = m_data.render_item_count;
+    uint32_t totalIndexCount = ibSize > 0 ? ibSize / 2 : 0;
 
-    for (uint32_t i = 0; i < vertexCount; i++) {
-        size_t off = static_cast<size_t>(i) * bestStride;
-        if (off + 12 > m_data.gpu_vertex_data.size()) break;
+    // Try to build per-render-item submeshes by splitting geometry evenly
+    // Each render item gets a proportional share of vertices and indices
+    bool multiSubmeshOk = false;
+    if (renderItemCount > 1 && totalVertCount > 0) {
+        // Populate render_items with even splits as best-effort
+        m_data.render_items.clear();
+        m_data.render_items.resize(renderItemCount);
 
-        Vertex v;
+        uint32_t vertsPerItem = totalVertCount / renderItemCount;
+        uint32_t indicesPerItem = totalIndexCount > 0 ? totalIndexCount / renderItemCount : 0;
 
-        // Position: float3 at offset 0 (LOCAL SPACE)
-        float lx, ly, lz;
-        std::memcpy(&lx, m_data.gpu_vertex_data.data() + off, 4);
-        std::memcpy(&ly, m_data.gpu_vertex_data.data() + off + 4, 4);
-        std::memcpy(&lz, m_data.gpu_vertex_data.data() + off + 8, 4);
+        uint32_t vertOffset = 0;
+        uint32_t idxOffset = 0;
+        bool allValid = true;
 
-        // Skip vertices with non-finite positions (garbage from misaligned submeshes)
-        if (!std::isfinite(lx) || !std::isfinite(ly) || !std::isfinite(lz)) {
-            continue;
+        for (uint32_t ri = 0; ri < renderItemCount; ri++) {
+            auto& item = m_data.render_items[ri];
+            item.vertex_stride = bestStride;
+            item.material_index = (ri < m_data.textures.size()) ? static_cast<int32_t>(ri) : 0;
+
+            // Last item gets the remainder
+            uint32_t thisVertCount = (ri == renderItemCount - 1)
+                ? (totalVertCount - vertOffset) : vertsPerItem;
+            uint32_t thisIdxCount = 0;
+
+            item.vertex_offset = vertOffset * bestStride;
+            item.vertex_count = thisVertCount;
+
+            if (totalIndexCount > 0) {
+                thisIdxCount = (ri == renderItemCount - 1)
+                    ? (totalIndexCount - idxOffset) : indicesPerItem;
+
+                // Find index range that references this vertex range
+                // Scan the index buffer to find contiguous run referencing [vertOffset, vertOffset+thisVertCount)
+                if (!m_data.gpu_index_data.empty()) {
+                    // Find the actual index range by scanning for indices in our vertex range
+                    uint32_t scanStart = idxOffset;
+                    uint32_t scanCount = 0;
+
+                    for (uint32_t si = scanStart; si < totalIndexCount; si++) {
+                        uint16_t idx;
+                        std::memcpy(&idx, m_data.gpu_index_data.data() + si * 2, 2);
+                        if (idx >= vertOffset && idx < vertOffset + thisVertCount) {
+                            scanCount++;
+                        } else if (scanCount > 0) {
+                            break; // End of contiguous range
+                        }
+                    }
+                    thisIdxCount = scanCount > 0 ? scanCount : thisIdxCount;
+                }
+
+                item.index_offset = idxOffset * 2;
+                item.index_count = thisIdxCount;
+                idxOffset += thisIdxCount;
+            }
+
+            vertOffset += thisVertCount;
+
+            Submesh submesh;
+            submesh.name = m_data.name + "_sub" + std::to_string(ri);
+            submesh.material_index = item.material_index;
+
+            decodeVertexRange(m_data.gpu_vertex_data.data(), vbSize,
+                              item.vertex_offset / bestStride, item.vertex_count,
+                              bestStride, centerX, centerY, centerZ, submesh);
+
+            if (item.index_count > 0 && !m_data.gpu_index_data.empty()) {
+                decodeIndexRange(m_data.gpu_index_data.data(), ibSize,
+                                 item.index_offset / 2, item.index_count,
+                                 item.vertex_offset / bestStride,
+                                 static_cast<uint32_t>(submesh.vertices.size()),
+                                 submesh);
+            } else {
+                // No indices: generate sequential
+                for (uint32_t vi = 0; vi < static_cast<uint32_t>(submesh.vertices.size()); vi++) {
+                    submesh.indices.push_back(vi);
+                }
+            }
+
+            if (submesh.vertices.empty()) {
+                allValid = false;
+                break;
+            }
+
+            submesh.bounding_min = mesh->bounding_min;
+            submesh.bounding_max = mesh->bounding_max;
+            mesh->submeshes.push_back(std::move(submesh));
         }
 
-        // Transform to world space by adding bounds center
-        v.position.x = lx + centerX;
-        v.position.y = ly + centerY;
-        v.position.z = lz + centerZ;
-
-        // Packed normal at offset 12 (if stride >= 16)
-        if (bestStride >= 16 && off + 16 <= m_data.gpu_vertex_data.size()) {
-            uint32_t packedNormal;
-            std::memcpy(&packedNormal, m_data.gpu_vertex_data.data() + off + 12, 4);
-            decodePackedNormal(packedNormal, v.normal.x, v.normal.y, v.normal.z);
+        if (allValid && !mesh->submeshes.empty()) {
+            multiSubmeshOk = true;
+        } else {
+            mesh->submeshes.clear();
         }
-
-        // UV at offset 16 as two uint16 (if stride >= 20)
-        if (bestStride >= 20 && off + 20 <= m_data.gpu_vertex_data.size()) {
-            uint16_t u16, v16;
-            std::memcpy(&u16, m_data.gpu_vertex_data.data() + off + 16, 2);
-            std::memcpy(&v16, m_data.gpu_vertex_data.data() + off + 18, 2);
-            // Interpret as fixed-point: value / 1024.0
-            v.texcoord0.u = u16 / 1024.0f;
-            v.texcoord0.v = v16 / 1024.0f;
-        }
-
-        submesh.vertices.push_back(v);
     }
 
-    // Decode indices
-    uint32_t actualVertCount = static_cast<uint32_t>(submesh.vertices.size());
-    if (!m_data.gpu_index_data.empty()) {
-        uint32_t indexCount = static_cast<uint32_t>(m_data.gpu_index_data.size() / 2);
-        submesh.indices.reserve(indexCount);
-        for (uint32_t i = 0; i < indexCount; i++) {
-            uint16_t idx;
-            std::memcpy(&idx, m_data.gpu_index_data.data() + i * 2, 2);
-            // Only include indices that reference valid vertices
-            if (idx < actualVertCount) {
-                submesh.indices.push_back(static_cast<uint32_t>(idx));
+    // Fall back to single submesh
+    if (!multiSubmeshOk) {
+        Submesh submesh;
+        submesh.name = m_data.name + "_geo";
+        submesh.material_index = 0;
+
+        decodeVertexRange(m_data.gpu_vertex_data.data(), vbSize,
+                          0, totalVertCount, bestStride,
+                          centerX, centerY, centerZ, submesh);
+
+        uint32_t actualVertCount = static_cast<uint32_t>(submesh.vertices.size());
+        if (!m_data.gpu_index_data.empty()) {
+            uint32_t indexCount = totalIndexCount;
+            submesh.indices.reserve(indexCount);
+            for (uint32_t i = 0; i < indexCount; i++) {
+                uint16_t idx;
+                std::memcpy(&idx, m_data.gpu_index_data.data() + i * 2, 2);
+                if (idx < actualVertCount) {
+                    submesh.indices.push_back(static_cast<uint32_t>(idx));
+                }
+            }
+        } else {
+            uint32_t triCount = actualVertCount / 3;
+            submesh.indices.reserve(triCount * 3);
+            for (uint32_t i = 0; i < triCount * 3; i++) {
+                submesh.indices.push_back(i);
             }
         }
-    } else {
-        // No index buffer: generate sequential indices (triangle list)
-        uint32_t triCount = actualVertCount / 3;
-        submesh.indices.reserve(triCount * 3);
-        for (uint32_t i = 0; i < triCount * 3; i++) {
-            submesh.indices.push_back(i);
-        }
+
+        submesh.bounding_min = mesh->bounding_min;
+        submesh.bounding_max = mesh->bounding_max;
+        mesh->submeshes.push_back(std::move(submesh));
     }
 
-    submesh.bounding_min = mesh->bounding_min;
-    submesh.bounding_max = mesh->bounding_max;
-
-    mesh->submeshes.push_back(std::move(submesh));
     m_data.meshes.push_back(std::move(mesh));
-
     return true;
 }
 

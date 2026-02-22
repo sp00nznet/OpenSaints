@@ -347,9 +347,31 @@ std::shared_ptr<MeshAsset> AssetManager::loadMeshInternal(const std::string& nam
         return asset;
     }
 
-    // Parse mesh data (simplified - actual implementation would use mesh parser)
+    // Parse mesh data from memory buffers
     asset->m_meshData = std::make_shared<MeshData>();
-    asset->m_meshData->name = name;
+
+    if (asset->m_skinned) {
+        CharacterMesh cmesh;
+        if (cmesh.openFromMemory(cpuResult.data.data(), cpuResult.data.size(),
+                                  gpuResult.data.data(), gpuResult.data.size(), name)) {
+            *asset->m_meshData = cmesh.data();
+        } else {
+            std::cerr << "Failed to parse character mesh: " << name << "\n";
+            asset->m_state = AssetState::Failed;
+            return asset;
+        }
+    } else {
+        StaticMesh smesh;
+        if (smesh.openFromMemory(cpuResult.data.data(), cpuResult.data.size(),
+                                  gpuResult.data.data(), gpuResult.data.size(), name)) {
+            *asset->m_meshData = smesh.data();
+        } else {
+            std::cerr << "Failed to parse static mesh: " << name << "\n";
+            asset->m_state = AssetState::Failed;
+            return asset;
+        }
+    }
+
     asset->m_memoryUsage = cpuResult.data.size() + gpuResult.data.size();
     asset->m_state = AssetState::Loaded;
 
@@ -416,27 +438,43 @@ std::shared_ptr<PegArchive> AssetManager::findPegArchive(const std::string& text
             continue;
         }
 
-        // Load PEG archive
+        // Load CPU header from VFS
         auto cpuResult = m_vfs->read(pegPath);
         if (!cpuResult.success) {
             continue;
         }
 
-        // Find GPU file
+        // Find GPU data file (.cpeg_pc -> .gpeg_pc, .cvbm_pc -> .gvbm_pc)
         std::string gpuPath = pegPath;
-        gpuPath.replace(gpuPath.find(".cpeg_pc"), 8, ".gpeg_pc");
+        auto cpegPos = gpuPath.find(".cpeg_pc");
+        auto cvbmPos = gpuPath.find(".cvbm_pc");
+        if (cpegPos != std::string::npos) {
+            gpuPath.replace(cpegPos, 8, ".gpeg_pc");
+        } else if (cvbmPos != std::string::npos) {
+            gpuPath.replace(cvbmPos, 8, ".gvbm_pc");
+        } else {
+            continue;
+        }
 
         auto gpuResult = m_vfs->read(gpuPath);
         if (!gpuResult.success) {
             continue;
         }
 
-        // Write to temp files and open PEG archive
-        // (In a real implementation, we'd have a memory-based PEG parser)
-        // For now, we skip this complex step
+        // Parse PEG from memory buffers
+        auto peg = std::make_shared<PegArchive>();
+        if (!peg->openFromMemory(cpuResult.data.data(), cpuResult.data.size(),
+                                  gpuResult.data.data(), gpuResult.data.size())) {
+            continue;
+        }
 
-        // This is a simplified placeholder
-        // A proper implementation would parse PEG from memory
+        // Cache the loaded archive
+        m_pegArchives[pegPath] = peg;
+
+        // Check if this archive contains the texture we're looking for
+        if (peg->findTexture(textureName)) {
+            return peg;
+        }
     }
 
     return nullptr;

@@ -209,10 +209,102 @@ bool PegArchive::open(const std::filesystem::path& cpuPath,
     return true;
 }
 
+bool PegArchive::openFromMemory(const uint8_t* cpuData, size_t cpuSize,
+                                const uint8_t* gpuData, size_t gpuSize) {
+    close();
+
+    if (!cpuData || cpuSize < sizeof(PegHeader)) {
+        std::cerr << "PEG openFromMemory: invalid CPU data\n";
+        return false;
+    }
+
+    // Read header
+    std::memcpy(&m_header, cpuData, sizeof(PegHeader));
+
+    if (m_header.signature != PEG_SIGNATURE) {
+        std::cerr << "Invalid PEG signature: 0x" << std::hex << m_header.signature
+                  << " (expected 0x" << PEG_SIGNATURE << ")\n";
+        return false;
+    }
+
+    if (m_header.version != PEG_VERSION) {
+        std::cerr << "Warning: PEG version " << m_header.version
+                  << " (expected " << PEG_VERSION << ")\n";
+    }
+
+    // Read texture entries
+    size_t entriesOffset = sizeof(PegHeader);
+    size_t entriesSize = m_header.num_textures * sizeof(PegTextureEntry);
+    if (entriesOffset + entriesSize > cpuSize) {
+        std::cerr << "PEG openFromMemory: CPU data too small for texture entries\n";
+        return false;
+    }
+
+    std::vector<PegTextureEntry> entries(m_header.num_textures);
+    std::memcpy(entries.data(), cpuData + entriesOffset, entriesSize);
+
+    // Read name table
+    size_t nameTableOffset = entriesOffset + entriesSize;
+    size_t nameTableSize = cpuSize - nameTableOffset;
+    if (m_header.header_size > nameTableOffset) {
+        nameTableSize = m_header.header_size - nameTableOffset;
+    }
+
+    // Parse names as sequential null-terminated strings
+    std::vector<std::string> nameList;
+    size_t pos = 0;
+    while (pos < nameTableSize) {
+        const char* namePtr = reinterpret_cast<const char*>(cpuData + nameTableOffset + pos);
+        std::string name(namePtr);
+        if (name.empty()) break;
+        nameList.push_back(name);
+        pos += name.length() + 1;
+    }
+
+    // Build texture list
+    m_textures.clear();
+    m_textures.reserve(m_header.num_textures);
+
+    for (size_t i = 0; i < entries.size(); i++) {
+        const auto& entry = entries[i];
+        PegTexture tex;
+
+        if (i < nameList.size()) {
+            tex.name = nameList[i];
+        }
+
+        tex.width = entry.width;
+        tex.height = entry.height;
+        tex.source_width = entry.source_width;
+        tex.source_height = entry.source_height;
+        tex.format = static_cast<PegFormat>(entry.format);
+        tex.mip_levels = entry.mip_levels;
+        tex.frames = entry.frames;
+        tex.frame_delay = entry.frame_delay;
+        tex.data_offset = entry.data_offset;
+        tex.data_size = tex.calculateDataSize();
+
+        m_textures.push_back(std::move(tex));
+    }
+
+    // Store GPU data buffer
+    if (gpuData && gpuSize > 0) {
+        m_gpuDataBuffer.assign(gpuData, gpuData + gpuSize);
+    } else {
+        std::cerr << "PEG openFromMemory: no GPU data provided\n";
+        m_textures.clear();
+        return false;
+    }
+
+    std::cout << "Opened PEG from memory (" << m_textures.size() << " textures)\n";
+    return true;
+}
+
 void PegArchive::close() {
     if (m_gpuFile.is_open()) {
         m_gpuFile.close();
     }
+    m_gpuDataBuffer.clear();
     m_textures.clear();
     m_header = {};
     m_cpuPath.clear();
@@ -229,16 +321,28 @@ const PegTexture* PegArchive::findTexture(const std::string& name) const {
 }
 
 std::vector<uint8_t> PegArchive::extractRaw(size_t index) {
-    if (index >= m_textures.size() || !m_gpuFile.is_open()) {
+    if (index >= m_textures.size() || !isOpen()) {
         return {};
     }
 
     const auto& tex = m_textures[index];
     std::vector<uint8_t> data(tex.data_size);
 
-    m_gpuFile.clear(); // Clear any error flags
-    m_gpuFile.seekg(tex.data_offset, std::ios::beg);
-    m_gpuFile.read(reinterpret_cast<char*>(data.data()), tex.data_size);
+    if (!m_gpuDataBuffer.empty()) {
+        // Memory-backed extraction
+        if (tex.data_offset + tex.data_size > m_gpuDataBuffer.size()) {
+            std::cerr << "PEG extractRaw: texture data out of bounds (offset="
+                      << tex.data_offset << " size=" << tex.data_size
+                      << " buffer=" << m_gpuDataBuffer.size() << ")\n";
+            return {};
+        }
+        std::memcpy(data.data(), m_gpuDataBuffer.data() + tex.data_offset, tex.data_size);
+    } else {
+        // File-backed extraction
+        m_gpuFile.clear();
+        m_gpuFile.seekg(tex.data_offset, std::ios::beg);
+        m_gpuFile.read(reinterpret_cast<char*>(data.data()), tex.data_size);
+    }
 
     return data;
 }

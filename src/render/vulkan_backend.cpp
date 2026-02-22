@@ -605,22 +605,22 @@ bool VulkanRenderer::createUniformBuffers() {
         m_uniformBuffers[i].size = bufferSize;
         m_uniformBuffers[i].type = BufferType::Uniform;
 
-        // Write descriptor set
+        // Write UBO descriptor (binding 0)
         VkDescriptorBufferInfo bufferInfo = {};
         bufferInfo.buffer = m_uniformBuffers[i].buffer;
         bufferInfo.offset = 0;
         bufferInfo.range = sizeof(UniformData);
 
-        VkWriteDescriptorSet descriptorWrite = {};
-        descriptorWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        descriptorWrite.dstSet = m_descriptorSets[i];
-        descriptorWrite.dstBinding = 0;
-        descriptorWrite.dstArrayElement = 0;
-        descriptorWrite.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-        descriptorWrite.descriptorCount = 1;
-        descriptorWrite.pBufferInfo = &bufferInfo;
+        VkWriteDescriptorSet uboWrite = {};
+        uboWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        uboWrite.dstSet = m_descriptorSets[i];
+        uboWrite.dstBinding = 0;
+        uboWrite.dstArrayElement = 0;
+        uboWrite.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        uboWrite.descriptorCount = 1;
+        uboWrite.pBufferInfo = &bufferInfo;
 
-        vkUpdateDescriptorSets(m_device, 1, &descriptorWrite, 0, nullptr);
+        vkUpdateDescriptorSets(m_device, 1, &uboWrite, 0, nullptr);
     }
 
     return true;
@@ -672,6 +672,28 @@ bool VulkanRenderer::createDefaultResources() {
     if (m_defaultPipeline == InvalidPipeline) {
         std::cerr << "Failed to create default pipeline\n";
         return false;
+    }
+
+    // Initialize descriptor sets with white texture as default sampler (binding 1)
+    auto whiteIt = m_textures.find(m_whiteTexture);
+    if (whiteIt != m_textures.end()) {
+        for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
+            VkDescriptorImageInfo imageInfo = {};
+            imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            imageInfo.imageView = whiteIt->second.view;
+            imageInfo.sampler = m_defaultSampler;
+
+            VkWriteDescriptorSet samplerWrite = {};
+            samplerWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            samplerWrite.dstSet = m_descriptorSets[i];
+            samplerWrite.dstBinding = 1;
+            samplerWrite.dstArrayElement = 0;
+            samplerWrite.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+            samplerWrite.descriptorCount = 1;
+            samplerWrite.pImageInfo = &imageInfo;
+
+            vkUpdateDescriptorSets(m_device, 1, &samplerWrite, 0, nullptr);
+        }
     }
 
     std::cout << "Default pipeline created\n";
@@ -1180,6 +1202,27 @@ void VulkanRenderer::bindIndexBuffer(BufferHandle handle) {
 
 void VulkanRenderer::bindTexture(uint32_t slot, TextureHandle handle) {
     m_boundTextures[slot] = handle;
+
+    // Update descriptor set with the actual texture
+    TextureHandle texHandle = (handle != InvalidTexture) ? handle : m_whiteTexture;
+    auto it = m_textures.find(texHandle);
+    if (it == m_textures.end()) return;
+
+    VkDescriptorImageInfo imageInfo = {};
+    imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    imageInfo.imageView = it->second.view;
+    imageInfo.sampler = m_defaultSampler;
+
+    VkWriteDescriptorSet descriptorWrite = {};
+    descriptorWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    descriptorWrite.dstSet = m_descriptorSets[m_currentFrame];
+    descriptorWrite.dstBinding = 1;
+    descriptorWrite.dstArrayElement = 0;
+    descriptorWrite.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    descriptorWrite.descriptorCount = 1;
+    descriptorWrite.pImageInfo = &imageInfo;
+
+    vkUpdateDescriptorSets(m_device, 1, &descriptorWrite, 0, nullptr);
 }
 
 void VulkanRenderer::setUniforms(const UniformData& uniforms) {

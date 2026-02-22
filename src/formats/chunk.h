@@ -128,6 +128,9 @@ public:
     // Export chunk geometry to OBJ
     bool exportOBJ(const std::filesystem::path& path) const;
 
+    // Decode packed normal (4 bytes) to float3
+    static void decodePackedNormal(uint32_t packed, float& nx, float& ny, float& nz);
+
 private:
     std::filesystem::path m_path;
     ChunkData m_data;
@@ -137,9 +140,6 @@ private:
     bool parseHeader(const std::vector<uint8_t>& data);
     bool parseTextures(const std::vector<uint8_t>& data);
     bool parseGeometry(const std::vector<uint8_t>& gpuData);
-
-    // Decode packed normal (4 bytes) to float3
-    static void decodePackedNormal(uint32_t packed, float& nx, float& ny, float& nz);
 };
 
 // Zone manager for streaming chunks

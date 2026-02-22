@@ -256,13 +256,152 @@ bool AnimationFile::parseHeader(const uint8_t* data, size_t size) {
 }
 
 bool AnimationFile::parseKeyframes(const uint8_t* data, size_t size, size_t offset) {
-    // Placeholder implementation
-    // Real implementation needs format reverse-engineering
+    AnimHeader header;
+    std::memcpy(&header, data, sizeof(AnimHeader));
 
-    // The actual format would contain:
-    // - Per-bone keyframe data
-    // - Compressed position/rotation/scale values
-    // - Time stamps
+    uint32_t numBones = header.num_bones;
+    uint32_t numFrames = header.num_frames;
+    float duration = header.duration > 0 ? header.duration : 1.0f;
+    float fps = header.fps > 0 ? header.fps : 30.0f;
+
+    if (numBones == 0 || numFrames == 0) {
+        return true; // Nothing to parse, fallback identity track will be created
+    }
+
+    // Sanity limits
+    if (numBones > 256 || numFrames > 100000) {
+        std::cerr << "Animation data has implausible bone/frame counts: "
+                  << numBones << " bones, " << numFrames << " frames\n";
+        return true; // Let the fallback handle it
+    }
+
+    // Try to read bone name table
+    // Bone names are expected as null-terminated strings starting right after AnimHeader
+    size_t nameTableOffset = sizeof(AnimHeader);
+    std::vector<std::string> boneNames;
+
+    if (nameTableOffset < offset) {
+        size_t pos = nameTableOffset;
+        while (pos < offset && boneNames.size() < numBones) {
+            if (pos >= size) break;
+            if (data[pos] == 0) {
+                pos++;
+                continue;
+            }
+            const char* namePtr = reinterpret_cast<const char*>(data + pos);
+            size_t maxLen = std::min(size - pos, size_t(64));
+            size_t nameLen = strnlen(namePtr, maxLen);
+            if (nameLen > 0 && nameLen < 64) {
+                boneNames.emplace_back(namePtr, nameLen);
+                pos += nameLen + 1;
+            } else {
+                break;
+            }
+        }
+    }
+
+    // Pad bone names if we didn't find enough
+    while (boneNames.size() < numBones) {
+        boneNames.push_back("bone_" + std::to_string(boneNames.size()));
+    }
+
+    // Parse keyframe data
+    // SR2 compressed keyframe format (best-effort):
+    // Per frame, per bone: 3 x int16 position + 4 x int16 rotation = 14 bytes per bone per frame
+    // Some formats use 6 bytes (rotation only, 3 x int16 compressed quat)
+    // Try the full format first, then the compact format
+
+    size_t fullFrameSize = numBones * 14; // 3*int16 pos + 4*int16 rot
+    size_t compactFrameSize = numBones * 6; // 3*int16 compressed quat (reconstruct w)
+    size_t dataAvailable = (offset + header.data_size <= size) ? header.data_size : (size - offset);
+
+    // Determine which format fits
+    enum class KeyframeFormat { Full14, CompactRot6, Unknown };
+    KeyframeFormat fmt = KeyframeFormat::Unknown;
+
+    if (numFrames * fullFrameSize <= dataAvailable) {
+        fmt = KeyframeFormat::Full14;
+    } else if (numFrames * compactFrameSize <= dataAvailable) {
+        fmt = KeyframeFormat::CompactRot6;
+    }
+
+    if (fmt == KeyframeFormat::Unknown) {
+        // Data doesn't match expected sizes, let fallback handle it
+        return true;
+    }
+
+    // Create bone tracks
+    m_clip.tracks.resize(numBones);
+    for (uint32_t b = 0; b < numBones; b++) {
+        m_clip.tracks[b].boneName = boneNames[b];
+        m_clip.tracks[b].boneIndex = static_cast<int32_t>(b);
+        m_clip.tracks[b].keyframes.resize(numFrames);
+    }
+
+    float timePerFrame = (numFrames > 1) ? (duration / (numFrames - 1)) : 0.0f;
+
+    // Position scale factor for int16 -> world units
+    // Typically positions are scaled to fit in [-32768, 32767] representing
+    // a range around the origin. A common scale is 1/100 or 1/1024.
+    constexpr float POS_SCALE = 1.0f / 1024.0f;
+    constexpr float ROT_SCALE = 1.0f / 32767.0f;
+
+    for (uint32_t f = 0; f < numFrames; f++) {
+        for (uint32_t b = 0; b < numBones; b++) {
+            BoneKeyframe& kf = m_clip.tracks[b].keyframes[f];
+            kf.time = f * timePerFrame;
+            kf.scale = Vec3Anim(1, 1, 1);
+
+            if (fmt == KeyframeFormat::Full14) {
+                size_t boneOffset = offset + f * fullFrameSize + b * 14;
+                if (boneOffset + 14 > size) {
+                    kf.position = Vec3Anim(0, 0, 0);
+                    kf.rotation = Quat::identity();
+                    continue;
+                }
+
+                // Position: 3 x int16
+                int16_t px, py, pz;
+                std::memcpy(&px, data + boneOffset + 0, 2);
+                std::memcpy(&py, data + boneOffset + 2, 2);
+                std::memcpy(&pz, data + boneOffset + 4, 2);
+                kf.position = Vec3Anim(px * POS_SCALE, py * POS_SCALE, pz * POS_SCALE);
+
+                // Rotation: 4 x int16 quaternion
+                int16_t rx, ry, rz, rw;
+                std::memcpy(&rx, data + boneOffset + 6, 2);
+                std::memcpy(&ry, data + boneOffset + 8, 2);
+                std::memcpy(&rz, data + boneOffset + 10, 2);
+                std::memcpy(&rw, data + boneOffset + 12, 2);
+                kf.rotation = Quat(rx * ROT_SCALE, ry * ROT_SCALE,
+                                   rz * ROT_SCALE, rw * ROT_SCALE).normalized();
+
+            } else if (fmt == KeyframeFormat::CompactRot6) {
+                size_t boneOffset = offset + f * compactFrameSize + b * 6;
+                if (boneOffset + 6 > size) {
+                    kf.position = Vec3Anim(0, 0, 0);
+                    kf.rotation = Quat::identity();
+                    continue;
+                }
+
+                kf.position = Vec3Anim(0, 0, 0);
+
+                // Rotation: 3 x int16 (x, y, z), reconstruct w
+                int16_t rx, ry, rz;
+                std::memcpy(&rx, data + boneOffset + 0, 2);
+                std::memcpy(&ry, data + boneOffset + 2, 2);
+                std::memcpy(&rz, data + boneOffset + 4, 2);
+
+                float qx = rx * ROT_SCALE;
+                float qy = ry * ROT_SCALE;
+                float qz = rz * ROT_SCALE;
+                float wSq = 1.0f - (qx * qx + qy * qy + qz * qz);
+                float qw = wSq > 0.0f ? std::sqrt(wSq) : 0.0f;
+
+                kf.rotation = Quat(qx, qy, qz, qw).normalized();
+            }
+        }
+    }
 
     return true;
 }

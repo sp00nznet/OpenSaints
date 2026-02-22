@@ -380,6 +380,120 @@ bool CharacterMesh::parseIndices(std::ifstream& gpuFile) {
     return true;
 }
 
+bool CharacterMesh::openFromMemory(const uint8_t* cpuData, size_t cpuSize,
+                                    const uint8_t* gpuData, size_t gpuSize,
+                                    const std::string& name) {
+    close();
+
+    if (!cpuData || cpuSize < 16 || !gpuData || gpuSize < 16) {
+        std::cerr << "CharacterMesh openFromMemory: invalid data\n";
+        return false;
+    }
+
+    m_data.name = name;
+    m_data.is_skinned = true;
+
+    // Parse signature
+    uint32_t signature;
+    std::memcpy(&signature, cpuData, 4);
+
+    if (signature != CMESH_SIGNATURE) {
+        std::cerr << "Invalid mesh signature: 0x" << std::hex << signature << std::dec << "\n";
+        return false;
+    }
+
+    // Look for texture names in CPU data
+    if (cpuSize > 0x60 + 256) {
+        size_t searchEnd = std::min(cpuSize, size_t(0x60 + 256));
+        for (size_t i = 0x60; i < searchEnd;) {
+            if (cpuData[i] != '\0') {
+                std::string texName(reinterpret_cast<const char*>(cpuData + i));
+                if (texName.length() > 4 && texName.length() < 64 &&
+                    (texName.find(".tga") != std::string::npos ||
+                     texName.find(".tgn") != std::string::npos)) {
+                    MeshMaterial mat;
+                    mat.diffuse_texture = texName;
+                    m_data.materials.push_back(mat);
+                }
+                i += texName.length() + 1;
+            } else {
+                i++;
+            }
+        }
+    }
+
+    // Parse vertices from GPU data
+    const size_t vertexStride = 40;
+    size_t numVerts = gpuSize / vertexStride;
+
+    Submesh submesh;
+    submesh.vertices.reserve(numVerts);
+
+    for (size_t i = 0; i < numVerts; ++i) {
+        const uint8_t* buf = gpuData + i * vertexStride;
+        if (i * vertexStride + vertexStride > gpuSize) break;
+
+        Vertex v;
+        std::memcpy(&v.position.x, buf + 0, 4);
+        std::memcpy(&v.position.y, buf + 4, 4);
+        std::memcpy(&v.position.z, buf + 8, 4);
+
+        v.normal.x = (buf[20] / 127.5f) - 1.0f;
+        v.normal.y = (buf[21] / 127.5f) - 1.0f;
+        v.normal.z = (buf[22] / 127.5f) - 1.0f;
+
+        int16_t u16, v16;
+        std::memcpy(&u16, buf + 28, 2);
+        std::memcpy(&v16, buf + 30, 2);
+        v.texcoord0.u = u16 / 1024.0f;
+        v.texcoord0.v = v16 / 1024.0f;
+
+        std::memcpy(v.bone_indices, buf + 36, 4);
+        v.color = buf[12] | (buf[13] << 8) | (buf[14] << 16) | (buf[15] << 24);
+
+        submesh.vertices.push_back(v);
+    }
+
+    // Parse indices from CPU data
+    if (!submesh.vertices.empty() && cpuSize > 0x50 + 12) {
+        size_t indexOffset = 0x50;
+        uint32_t first3[3];
+        std::memcpy(first3, cpuData + indexOffset, 12);
+
+        if (first3[0] < submesh.vertices.size() &&
+            first3[1] < submesh.vertices.size() &&
+            first3[2] < submesh.vertices.size()) {
+            size_t maxIndices = (cpuSize - indexOffset) / 4;
+            for (size_t i = 0; i < maxIndices; ++i) {
+                uint32_t idx;
+                std::memcpy(&idx, cpuData + indexOffset + i * 4, 4);
+                if (idx >= submesh.vertices.size() || idx == 0xFFFFFFFF) break;
+                submesh.indices.push_back(idx);
+            }
+        }
+    }
+
+    // Fallback to sequential indices
+    if (submesh.indices.empty()) {
+        for (size_t i = 0; i < submesh.vertices.size(); ++i) {
+            submesh.indices.push_back(static_cast<uint32_t>(i));
+        }
+    }
+
+    m_data.submeshes.push_back(std::move(submesh));
+    m_isOpen = true;
+
+    size_t totalVerts = 0, totalTris = 0;
+    for (const auto& sm : m_data.submeshes) {
+        totalVerts += sm.vertices.size();
+        totalTris += sm.indices.size() / 3;
+    }
+    std::cout << "Opened character mesh from memory: " << name
+              << " (" << totalVerts << " verts, " << totalTris << " tris)\n";
+
+    return true;
+}
+
 bool CharacterMesh::exportOBJ(const std::filesystem::path& path) const {
     return exportMeshToOBJ(m_data, path);
 }
@@ -511,6 +625,77 @@ void StaticMesh::close() {
     m_cpuPath.clear();
     m_gpuPath.clear();
     m_isOpen = false;
+}
+
+bool StaticMesh::openFromMemory(const uint8_t* cpuData, size_t cpuSize,
+                                 const uint8_t* gpuData, size_t gpuSize,
+                                 const std::string& name) {
+    close();
+
+    if (!cpuData || cpuSize < sizeof(MeshHeader) || !gpuData) {
+        std::cerr << "StaticMesh openFromMemory: invalid data\n";
+        return false;
+    }
+
+    m_data.name = name;
+    m_data.is_skinned = false;
+
+    // Read header
+    MeshHeader header;
+    std::memcpy(&header, cpuData, sizeof(MeshHeader));
+
+    m_data.bounding_min = {header.bounding_min[0], header.bounding_min[1], header.bounding_min[2]};
+    m_data.bounding_max = {header.bounding_max[0], header.bounding_max[1], header.bounding_max[2]};
+    m_data.bounding_center = {header.bounding_center[0], header.bounding_center[1], header.bounding_center[2]};
+    m_data.bounding_radius = header.bounding_radius;
+
+    // Parse vertices from GPU data
+    const size_t vertexStride = 32;
+
+    if (gpuSize >= vertexStride) {
+        size_t estimatedVerts = gpuSize / vertexStride;
+
+        Submesh submesh;
+        submesh.vertices.reserve(estimatedVerts);
+
+        for (size_t i = 0; i < estimatedVerts; ++i) {
+            const uint8_t* buf = gpuData + i * vertexStride;
+            if (i * vertexStride + vertexStride > gpuSize) break;
+
+            Vertex v;
+            std::memcpy(&v.position.x, buf + 0, 4);
+            std::memcpy(&v.position.y, buf + 4, 4);
+            std::memcpy(&v.position.z, buf + 8, 4);
+
+            std::memcpy(&v.normal.x, buf + 12, 4);
+            std::memcpy(&v.normal.y, buf + 16, 4);
+            std::memcpy(&v.normal.z, buf + 20, 4);
+
+            std::memcpy(&v.texcoord0.u, buf + 24, 4);
+            std::memcpy(&v.texcoord0.v, buf + 28, 4);
+
+            submesh.vertices.push_back(v);
+        }
+
+        // Generate sequential indices
+        for (size_t i = 0; i < submesh.vertices.size(); ++i) {
+            submesh.indices.push_back(static_cast<uint32_t>(i));
+        }
+
+        m_data.submeshes.push_back(std::move(submesh));
+    }
+
+    m_isOpen = true;
+
+    size_t totalVerts = 0, totalTris = 0;
+    for (const auto& sm : m_data.submeshes) {
+        totalVerts += sm.vertices.size();
+        totalTris += sm.indices.size() / 3;
+    }
+    std::cout << "Opened static mesh from memory: " << name
+              << " (" << totalVerts << " verts, " << totalTris << " tris)\n";
+
+    return true;
 }
 
 bool StaticMesh::exportOBJ(const std::filesystem::path& path) const {

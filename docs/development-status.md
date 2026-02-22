@@ -10,21 +10,19 @@ OpenSaints is in early development. The core rendering pipeline is functional wi
 
 | Component | Status | Notes |
 |-----------|--------|-------|
-| **Vulkan Renderer** | Working | Basic geometry, MVP transforms, vertex colors |
+| **Vulkan Renderer** | Working | Geometry, MVP, vertex colors, texture binding with descriptor sets |
 | **SDL2 Window** | Working | Window creation, input handling, mouse capture |
 | **Demo Scene** | Working | Rotating triangle and cube |
-| **VPP Extraction** | Working | Python tool extracts archives |
+| **VPP Extraction** | Working | Python and C++ tools |
 | **Build System** | Working | CMake, builds on Windows with MSVC |
-
-### In Progress
-
-| Component | Status | Notes |
-|-----------|--------|-------|
-| **Asset Manager** | Skeleton | Code exists, not tested with real assets |
-| **VFS** | Skeleton | Code exists, not integrated |
-| **Mesh Parser** | Skeleton | Code exists, not tested |
-| **Texture Rendering** | Not started | Shaders only use vertex colors currently |
-| **Multi-submesh chunks** | Partial | Render item descriptors not yet parsed for multi-submesh chunks |
+| **Asset Manager** | Working | Full VFS integration, PEG + mesh from-memory loading |
+| **VFS** | Working | Mount VPPs, priority resolution, file read |
+| **Mesh Parser** | Working | Character + static mesh from disk and memory |
+| **Texture Shaders** | Working | SPIR-V with texture sampling + diffuse/ambient lighting |
+| **Multi-submesh Chunks** | Working | Per-render-item submesh splitting with material indices |
+| **Animation Parser** | Working | Keyframe parsing (Full14 + CompactRot6 formats) |
+| **Preload Tables** | Working | Text-based ID-to-filename mapping |
+| **XTBL Parser** | Working | Full DOM-style XML parser |
 
 ### What Works (Asset Loading)
 
@@ -47,7 +45,7 @@ OpenSaints is in early development. The core rendering pipeline is functional wi
 
 | Component | Notes |
 |-----------|-------|
-| Animation playback | Parser exists but not integrated |
+| Animation playback | Parser complete, needs runtime integration |
 | Audio | OpenAL skeleton exists |
 | UI | VINT parser skeleton exists |
 | Physics | Skeleton exists |
@@ -80,9 +78,10 @@ OpenSaints/
 │   ├── formats/              # File parsers
 │   │   ├── chunk.h/cpp       # World chunks (WORKING - real binary format)
 │   │   ├── vpp.h/cpp         # VPP archives (WORKING)
-│   │   ├── peg.h/cpp         # Textures (WORKING)
-│   │   └── mesh.h/cpp        # Meshes (SKELETON)
-│   ├── engine/               # Core systems (SKELETON)
+│   │   ├── peg.h/cpp         # Textures (WORKING - disk + memory)
+│   │   ├── mesh.h/cpp        # Meshes (WORKING - disk + memory)
+│   │   └── anim.h/cpp        # Animations (WORKING - keyframe parsing)
+│   ├── engine/               # Core systems (WORKING)
 │   ├── world/
 │   │   └── streaming.h/cpp   # Chunk streaming (WORKING - real bounds)
 │   ├── render/
@@ -108,21 +107,19 @@ OpenSaints/
 
 ## Next Steps
 
-### Immediate Priority: Multi-submesh Chunk Parsing
+### Immediate Priority: End-to-End Textured Rendering
 
-1. **Parse render item descriptors** from CPU file to split GPU buffers into submeshes
-2. **Handle per-submesh vertex strides** (some submeshes use 24/28/32 byte strides)
-3. **Material/texture mapping** per submesh via render item material indices
-4. **Test with large chunks** (chunk028, chunk048, etc. with 2000+ render items)
+1. **Textured chunk rendering** - Wire up PEG textures to chunk submesh materials in the viewer
+2. **Entity system** - Basic entity spawning with mesh + transform components
+3. **Render queue** - Batched draw calls sorted by material/texture
 
 ### Subsequent Priorities
 
-1. Asset manager + VFS integration for full streaming pipeline
-2. Test mesh parser - load and render a static mesh
-3. Character mesh + animation
-4. Textured rendering (map chunk textures to PEG packages)
-5. Basic lighting in shaders
-6. Audio system integration
+1. Animation playback integration with skinned meshes
+2. Audio system integration (OpenAL)
+3. UI system (VINT document rendering)
+4. Physics integration
+5. Scripting system
 
 ## Known Issues
 

@@ -143,6 +143,11 @@ public:
     bool open(const std::filesystem::path& cpuPath,
               const std::filesystem::path& gpuPath);
 
+    // Open from memory buffers (for VFS integration)
+    bool openFromMemory(const uint8_t* cpuData, size_t cpuSize,
+                        const uint8_t* gpuData, size_t gpuSize,
+                        const std::string& name = "");
+
     // Close the mesh
     void close();
 
@@ -176,6 +181,11 @@ public:
     bool open(const std::filesystem::path& path);
     bool open(const std::filesystem::path& cpuPath,
               const std::filesystem::path& gpuPath);
+
+    // Open from memory buffers (for VFS integration)
+    bool openFromMemory(const uint8_t* cpuData, size_t cpuSize,
+                        const uint8_t* gpuData, size_t gpuSize,
+                        const std::string& name = "");
 
     void close();
 
